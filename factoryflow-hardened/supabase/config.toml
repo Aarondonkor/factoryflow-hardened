@@ -1,0 +1,31 @@
+# Supabase local development config
+# See: https://supabase.com/docs/guides/cli
+
+project_id = "factoryflow"
+
+[api]
+enabled = true
+port = 54321
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[functions.paystack-payment]
+verify_jwt = true
+
+[functions.paystack-webhook]
+verify_jwt = false # Paystack's HMAC signature is verified in the function.
+
+[functions.admin-invite-staff]
+verify_jwt = true
+
+[functions.paystack-refund]
+verify_jwt = true
+
+[functions.reconcile-payments]
+verify_jwt = false # Service endpoint authorizes using a separate long random token.

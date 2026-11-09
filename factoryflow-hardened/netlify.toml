@@ -1,0 +1,11 @@
+# FactoryFlow Hardened: Netlify reads this file from the GitHub repo root.
+# The Vite application lives in /frontend; Supabase functions are deployed separately.
+[build]
+  base = "frontend"
+  command = "npm run check"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# The frontend/public/_redirects and _headers files provide SPA routing and headers.
