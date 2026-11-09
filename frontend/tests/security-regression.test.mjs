@@ -7,7 +7,18 @@ import {resolve} from 'node:path'
 
 const root=resolve(import.meta.dirname,'../..')
 const src=(path)=>readFileSync(resolve(root,path),'utf8')
-const migration=(n)=>src(`supabase/migrations/${n}`)
+// Supabase migrations use timestamp prefixes (e.g. 20261108000017_...).
+// Resolve by a unique descriptive suffix so this works for both legacy
+// 017_*.sql and Supabase CLI-compatible timestamped migration filenames.
+const migration=(n)=>{
+  const suffix=n.replace(/^\d{3}_/,'')
+  const migrationDir=resolve(root,'supabase/migrations')
+  const matches=readdirSync(migrationDir).filter(file=>
+    file===n || file.endsWith(`_${suffix}`)
+  )
+  assert.equal(matches.length,1,`Expected one migration for ${n}, found: ${matches.join(', ') || 'none'}`)
+  return readFileSync(resolve(migrationDir,matches[0]),'utf8')
+}
 
 test('the hardened signup trigger ignores client metadata role claims',()=>{
   const sql=migration('017_security_transactions.sql')
