@@ -14,6 +14,8 @@ import { PageTabs } from '@/components/ui/PageTabs'
 import { StockAdjustModal } from './StockAdjustModal'
 import { MaterialFormModal } from './MaterialFormModal'
 import { RollReconcileModal } from './RollReconcileModal'
+import { RollDetailModal } from './RollDetailModal'
+import { asRollSearchResult, ROLL_PAGE_SIZE, type InventoryRollRecord } from './rollSearch'
 
 type Tab = 'raw' | 'finished' | 'rolls' | 'movements'
 
@@ -24,6 +26,16 @@ export function InventoryPage() {
   const [movements, setMovements] = useState<StockMovement[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [rolls, setRolls] = useState<ProductRoll[]>([])
+  const [rollSearch, setRollSearch] = useState('')
+  const [rollQuery, setRollQuery] = useState('')
+  const [rollStatus, setRollStatus] = useState('')
+  const [rollPage, setRollPage] = useState(0)
+  const [rollRefresh, setRollRefresh] = useState(0)
+  const [adminRolls, setAdminRolls] = useState<InventoryRollRecord[]>([])
+  const [adminRollTotal, setAdminRollTotal] = useState(0)
+  const [rollLoading, setRollLoading] = useState(false)
+  const [rollError, setRollError] = useState<string | null>(null)
+  const [selectedRoll, setSelectedRoll] = useState<InventoryRollRecord | null>(null)
   const [loading, setLoading] = useState(true)
   const [fetchError,setFetchError]=useState<string | null>(null)
   const [discrepancies,setDiscrepancies]=useState<Record<string,number>>({})
@@ -41,7 +53,7 @@ export function InventoryPage() {
       supabase.from('finished_goods').select('*').order('product_name').limit(500),
       supabase.from('stock_movements').select('*').order('created_at', { ascending: false }).limit(100),
       supabase.from('customers').select('*').order('name').limit(500),
-      supabase.from('product_rolls').select('*').order('roll_no', { ascending: false }).limit(500),
+      isAdmin ? Promise.resolve({ data: [] as ProductRoll[], error: null }) : supabase.from('product_rolls').select('*').order('roll_no', { ascending: false }).limit(500),
     ])
 
     const failed=[rawRes,finRes,movRes,custRes,rollRes].find(r=>r.error)
@@ -64,7 +76,44 @@ export function InventoryPage() {
     void fetchData()
   }, [fetchData])
 
-  useAutoRefresh(() => fetchData(true), 60000)
+  useEffect(() => {
+    const timer = window.setTimeout(() => setRollQuery(rollSearch.trim()), 300)
+    return () => window.clearTimeout(timer)
+  }, [rollSearch])
+
+  useEffect(() => {
+    if (!isAdmin || tab !== 'rolls') return
+    let active = true
+    const load = async () => {
+      setRollLoading(true)
+      setRollError(null)
+      const { data, error } = await supabase.rpc('search_inventory_rolls', {
+        p_search: rollQuery,
+        p_status: rollStatus || null,
+        p_limit: ROLL_PAGE_SIZE,
+        p_offset: rollPage * ROLL_PAGE_SIZE,
+      })
+      if (!active) return
+      if (error) {
+        setRollError(error.message)
+      } else {
+        try {
+          const result = asRollSearchResult(data)
+          setAdminRolls(result.rows)
+          setAdminRollTotal(result.total)
+          // Handle a page becoming empty after concurrent stock changes.
+          if (rollPage > 0 && rollPage * ROLL_PAGE_SIZE >= result.total) setRollPage(0)
+        } catch (err) {
+          setRollError(err instanceof Error ? err.message : 'Unable to read roll search results')
+        }
+      }
+      setRollLoading(false)
+    }
+    void load()
+    return () => { active = false }
+  }, [isAdmin, tab, rollQuery, rollStatus, rollPage, rollRefresh])
+
+  useAutoRefresh(() => { void fetchData(true); setRollRefresh(value => value + 1) }, 60000)
 
   const toggleOrderable = async (id: string, next: boolean) => {
     const { error } = await supabase.from('finished_goods').update({ customer_orderable: next }).eq('id', id)
@@ -247,52 +296,114 @@ export function InventoryPage() {
 
       {tab === 'rolls' && (
         <Card title="Individual Rolls">
-          <p className="text-xs text-slate-500 mb-3">Showing up to the latest 500 individual rolls; summaries below reflect this page, not all-time inventory.</p>
-          <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-            {(['available', 'reserved', 'sold', 'consumed'] as const).map((st) => {
-              const list = rolls.filter((r) => r.status === st)
-              return (
-                <div key={st} className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-xs capitalize text-slate-500">{st}</p>
-                  <p className="font-semibold text-slate-900">{list.length} rolls</p>
-                  <p className="text-xs text-slate-500">{formatKg(list.reduce((s, r) => s + r.weight_kg, 0))}</p>
+          {isAdmin && (
+            <div className="mb-5 space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-end">
+                <div className="flex-1">
+                  <label htmlFor="admin-roll-search" className="label">Search branded rolls</label>
+                  <input
+                    id="admin-roll-search"
+                    type="search"
+                    className="input"
+                    placeholder="Brand, customer, product, batch ID, date or roll number"
+                    value={rollSearch}
+                    maxLength={120}
+                    onChange={(event) => { setRollSearch(event.target.value); setRollPage(0) }}
+                  />
                 </div>
-              )
-            })}
-          </div>
-          <ResponsiveTable
-            headers={['Roll #', 'Product', 'Weight', 'Micron', 'Status', 'Logged']}
-            isEmpty={rolls.length === 0}
-            emptyMessage="No individual rolls yet. They appear when a printing run is logged with roll weights."
-          >
-            {rolls.map((r) => {
-              const product = finishedGoods.find((g) => g.id === r.finished_good_id)
-              return (
-                <TableRow
-                  key={r.id}
-                  cells={[
-                    `#${r.roll_no}`,
-                    product?.product_name || '—',
-                    formatKg(r.weight_kg),
-                    r.micron ? `${r.micron}µ` : '—',
-                    <Badge variant={r.status === 'available' ? 'success' : r.status === 'reserved' ? 'warning' : 'default'}>
-                      {r.status}
-                    </Badge>,
-                    formatDate(r.created_at),
-                  ]}
-                  mobileCard={
-                    <div className="space-y-1 text-sm">
-                      <div className="flex justify-between">
-                        <span className="font-medium">#{r.roll_no} · {product?.product_name || '—'}</span>
-                        <span>{formatKg(r.weight_kg)}</span>
+                <div className="md:w-44">
+                  <label htmlFor="admin-roll-status" className="label">Roll status</label>
+                  <select id="admin-roll-status" className="input" value={rollStatus}
+                    onChange={event => { setRollStatus(event.target.value); setRollPage(0) }}>
+                    <option value="">All statuses</option>
+                    <option value="available">Available</option>
+                    <option value="reserved">Reserved</option>
+                    <option value="sold">Sold</option>
+                    <option value="consumed">Consumed</option>
+                  </select>
+                </div>
+                <Button variant="secondary" onClick={() => setRollRefresh(value => value + 1)}>
+                  Refresh
+                </Button>
+              </div>
+              <p className="text-xs text-slate-500">
+                Search covers all recorded rolls, not only the most recent 500. Match branded product names,
+                assigned customer businesses, batch IDs, production dates (YYYY-MM-DD) or roll numbers.
+              </p>
+            </div>
+          )}
+          <p className="text-xs text-slate-500 mb-3" aria-live="polite">
+            {isAdmin
+              ? `Showing ${adminRolls.length} of ${adminRollTotal} matching rolls${adminRollTotal ? ` · Page ${rollPage + 1} of ${Math.ceil(adminRollTotal / ROLL_PAGE_SIZE)}` : ''}. Status totals below reflect this page.`
+              : 'Showing up to the latest 500 individual rolls; summaries below reflect this page.'}
+          </p>
+          {rollError && isAdmin ? (
+            <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              Roll search unavailable: {rollError}. Check that database migration 022 is applied.
+              <div className="mt-2"><Button variant="secondary" onClick={() => setRollRefresh(value => value + 1)}>Retry</Button></div>
+            </div>
+          ) : null}
+          {(() => {
+            const visibleRolls = isAdmin ? adminRolls : rolls
+            return <>
+              <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                {(['available', 'reserved', 'sold', 'consumed'] as const).map(st => {
+                  const matching = visibleRolls.filter(roll => roll.status === st)
+                  return <div key={st} className="rounded-xl bg-slate-50 p-3">
+                    <p className="text-xs capitalize text-slate-500">{st}</p>
+                    <p className="font-semibold text-slate-900">{matching.length} rolls</p>
+                    <p className="text-xs text-slate-500">{formatKg(matching.reduce((total, roll) => total + Number(roll.weight_kg), 0))}</p>
+                  </div>
+                })}
+              </div>
+              {isAdmin && rollLoading ? <LoadingSpinner className="py-8" /> : !rollError && (
+                <ResponsiveTable
+                  headers={['Roll #', 'Product / Brand', 'Batch ID', 'Production date', 'Weight', 'Micron', 'Status', 'Actions']}
+                  isEmpty={visibleRolls.length === 0}
+                  emptyMessage={isAdmin
+                    ? 'No rolls match your search. Try another brand, batch ID, or status.'
+                    : 'No individual rolls yet. They appear when a printing run is logged with roll weights.'}
+                >
+                  {visibleRolls.map(roll => {
+                    const product = finishedGoods.find(g => g.id === roll.finished_good_id)
+                    const details = isAdmin ? roll as InventoryRollRecord : null
+                    const name = details?.product_name || product?.product_name || 'Unknown product'
+                    return <TableRow key={roll.id} cells={[
+                      isAdmin && details
+                        ? <button type="button" className="font-semibold text-brand-800 hover:underline focus-visible:underline" onClick={() => setSelectedRoll(details)}>#{roll.roll_no}</button>
+                        : `#${roll.roll_no}`,
+                      <div><p className="font-medium">{name}</p>{details?.brand_name && <p className="text-xs text-slate-500">{details.brand_name}</p>}</div>,
+                      details?.batch_id || '—',
+                      details?.production_date ? formatDate(details.production_date) : '—',
+                      formatKg(Number(roll.weight_kg)),
+                      roll.micron != null ? `${roll.micron}µ` : '—',
+                      <Badge variant={roll.status === 'available' ? 'success' : roll.status === 'reserved' ? 'warning' : 'default'}>{roll.status}</Badge>,
+                      isAdmin && details ? <Button variant="secondary" onClick={() => setSelectedRoll(details)}>View details</Button> : null,
+                    ]} mobileCard={
+                      <div className="space-y-2 text-sm">
+                        <div className="flex items-start justify-between gap-3">
+                          <div><p className="font-semibold">#{roll.roll_no} · {name}</p>{details?.brand_name && <p className="text-xs text-slate-500">{details.brand_name}</p>}</div>
+                          <span className="whitespace-nowrap">{formatKg(Number(roll.weight_kg))}</span>
+                        </div>
+                        {details && <p className="text-xs text-slate-500">Batch: {details.batch_id || 'Not recorded'} · Produced: {details.production_date ? formatDate(details.production_date) : 'Not recorded'}</p>}
+                        <Badge variant={roll.status === 'available' ? 'success' : roll.status === 'reserved' ? 'warning' : 'default'}>{roll.status}</Badge>
+                        {isAdmin && details && <Button variant="secondary" className="w-full" onClick={() => setSelectedRoll(details)}>View roll details</Button>}
                       </div>
-                      <p className="text-xs text-slate-500">{r.status}{r.micron ? ` · ${r.micron}µ` : ''}</p>
-                    </div>
-                  }
-                />
-              )
-            })}
-          </ResponsiveTable>
+                    } />
+                  })}
+                </ResponsiveTable>
+              )}
+            </>
+          })()}
+          {isAdmin && !rollError && adminRollTotal > ROLL_PAGE_SIZE && (
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+              <p className="text-xs text-slate-500">{rollPage * ROLL_PAGE_SIZE + 1}–{Math.min((rollPage + 1) * ROLL_PAGE_SIZE, adminRollTotal)} of {adminRollTotal} rolls</p>
+              <div className="flex gap-2">
+                <Button variant="secondary" disabled={rollLoading || rollPage === 0} onClick={() => setRollPage(page => page - 1)}>Previous</Button>
+                <Button variant="secondary" disabled={rollLoading || (rollPage + 1) * ROLL_PAGE_SIZE >= adminRollTotal} onClick={() => setRollPage(page => page + 1)}>Next</Button>
+              </div>
+            </div>
+          )}
         </Card>
       )}
 
@@ -339,6 +450,8 @@ export function InventoryPage() {
           </ResponsiveTable>
         </Card>
       )}
+
+      {isAdmin && <RollDetailModal roll={selectedRoll} onClose={() => setSelectedRoll(null)} />}
 
       {reconcileId && (()=>{
         const product=finishedGoods.find(f=>f.id===reconcileId)
