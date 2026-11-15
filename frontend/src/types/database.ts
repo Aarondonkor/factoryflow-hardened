@@ -85,6 +85,21 @@ export interface ProductionRunMaterial {
   raw_materials?: RawMaterial
 }
 
+export interface ProductionRunAdditionalOutput {
+  id: string
+  production_run_id: string
+  finished_good_id: string
+  output_quantity: number
+  output_unit: 'kg' | 'rolls' | 'bundle'
+  roll_weights: number[] | null
+  batch_id: string | null
+  film_thickness: number | null
+  film_width: number | null
+  film_color: string | null
+  quality_grade: number | null
+  finished_goods?: Pick<FinishedGood, 'product_name' | 'stage'>
+}
+
 export interface ProductionRun {
   id: string
   run_date: string
@@ -97,7 +112,7 @@ export interface ProductionRun {
   film_width: number | null
   film_color: string | null
   output_quantity: number
-  output_unit: 'kg' | 'rolls'
+  output_unit: 'kg' | 'rolls' | 'bundle'
   resin_material_id: string | null
   resin_consumed: number
   additive_material_id: string | null
@@ -152,6 +167,7 @@ export interface ProductionRun {
   finished_goods?: FinishedGood
   input_product?: FinishedGood
   production_run_materials?: ProductionRunMaterial[]
+  production_run_additional_outputs?: ProductionRunAdditionalOutput[]
 }
 
 export interface MachineDowntime {

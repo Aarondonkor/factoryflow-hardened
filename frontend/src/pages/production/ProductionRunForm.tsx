@@ -23,6 +23,30 @@ interface MaterialLine {
   proportion_pct: string
 }
 
+interface AdditionalOutputLine {
+  key: string
+  finished_good_id: string
+  output_quantity: string
+  roll_weights_text: string
+  batch_id: string
+  film_thickness: string
+  film_width: string
+  film_color: string
+  quality_grade: string
+}
+
+function parseRollWeights(text: string): number[] {
+  return text.split(/[\s,;]+/).filter(Boolean).map(Number)
+}
+
+function emptyAdditionalOutput(): AdditionalOutputLine {
+  return {
+    key: crypto.randomUUID(), finished_good_id: '', output_quantity: '',
+    roll_weights_text: '', batch_id: '', film_thickness: '', film_width: '',
+    film_color: '', quality_grade: '',
+  }
+}
+
 const EXTRUSION_QC_ISSUES = ['Dimensional variance', 'Button Sealing Off', 'Machine Performance Anomaly', 'Other']
 const PRINTING_QC_ISSUES = ['Faded Prints', 'Wet Prints', 'Machine Anomaly', 'Other']
 
@@ -51,6 +75,11 @@ export function ProductionRunForm({
   const initialIsConversion = initialMachine?.stage === 'conversion'
 
   const [materials, setMaterials] = useState<MaterialLine[]>([emptyMaterialLine(rawMaterials)])
+  const [additionalOutputs, setAdditionalOutputs] = useState<AdditionalOutputLine[]>([])
+
+  const updateOutput = (key: string, patch: Partial<AdditionalOutputLine>) => {
+    setAdditionalOutputs((outputs) => outputs.map((item) => item.key === key ? { ...item, ...patch } : item))
+  }
 
   const [form, setForm] = useState({
     run_date: toInputDate(),
@@ -63,7 +92,6 @@ export function ProductionRunForm({
     film_width: '',
     film_color: '',
     output_quantity: '',
-    output_unit: 'kg' as 'kg' | 'rolls',
     input_product_id: initialIsConversion ? (semiFinishedGoods[0]?.id || '') : '',
     input_quantity_consumed: '',
     process_type: 'cutting' as ConversionProcessType,
@@ -116,10 +144,7 @@ export function ProductionRunForm({
   // e.g. "12.3, 14.6, 20, 11, 19.9". Each weight becomes one sellable roll.
   const outputProduct = finishedGoods.find((g) => g.id === form.finished_good_id)
   const rollMode = outputProduct?.unit === 'rolls'
-  const parsedWeights = form.roll_weights_text
-    .split(/[\s,;]+/)
-    .filter((t) => t.length > 0)
-    .map((t) => Number(t))
+  const parsedWeights = parseRollWeights(form.roll_weights_text)
   useEffect(()=>{
     setSelectedInputRollIds([])
     if(!isConversion||selectedInputProduct?.unit!=='rolls') {setInputRolls([]);setInputRollError(null);return}
@@ -151,6 +176,7 @@ export function ProductionRunForm({
       qc_issues: [],
     })
     setMaterials([emptyMaterialLine(rawMaterials)])
+    setAdditionalOutputs([])
   }
 
   const updateMaterial = (index: number, patch: Partial<MaterialLine>) => {
@@ -172,9 +198,52 @@ export function ProductionRunForm({
       addToast('Select the available physical input rolls before logging conversion','error')
       return
     }
-    if (rollMode && (parsedWeights.length === 0 || weightsInvalid)) {
-      addToast('Enter the weight of each roll in kg, separated by commas (e.g. 12.3, 14.6, 20)', 'error')
+    if (!outputProduct || !outputOptions.some((g) => g.id === outputProduct.id)) {
+      addToast('Select a valid output product for the selected machine', 'error')
       return
+    }
+    if (rollMode && (parsedWeights.length === 0 || parsedWeights.length > 1000 || weightsInvalid)) {
+      addToast('Enter 1–1000 measured roll weights, each greater than 0 and at most 500 kg', 'error')
+      return
+    }
+    if (!rollMode && !(Number(form.output_quantity) > 0)) {
+      addToast('Enter a positive output quantity', 'error')
+      return
+    }
+    if (additionalOutputs.length > 19) {
+      addToast('A run can include at most 20 output lines', 'error')
+      return
+    }
+
+    const moreOutputs = []
+    for (const line of additionalOutputs) {
+      const product = outputOptions.find((g) => g.id === line.finished_good_id)
+      if (!product) {
+        addToast('Choose a valid product for every additional output', 'error')
+        return
+      }
+      const weights = parseRollWeights(line.roll_weights_text)
+      if (product.unit === 'rolls' && (weights.length === 0 || weights.length > 1000 ||
+        weights.some((w) => !Number.isFinite(w) || w <= 0 || w > 500))) {
+        addToast(`Enter valid individual weights for ${product.product_name}`, 'error')
+        return
+      }
+      const quantity = product.unit === 'rolls' ? weights.length : Number(line.output_quantity)
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        addToast(`Enter a positive output quantity for ${product.product_name}`, 'error')
+        return
+      }
+      moreOutputs.push({
+        finished_good_id: product.id,
+        output_unit: product.unit,
+        output_quantity: quantity,
+        roll_weights: product.unit === 'rolls' ? weights : null,
+        batch_id: line.batch_id || null,
+        film_thickness: line.film_thickness ? Number(line.film_thickness) : null,
+        film_width: line.film_width ? Number(line.film_width) : null,
+        film_color: line.film_color || null,
+        quality_grade: line.quality_grade ? Number(line.quality_grade) : null,
+      })
     }
 
     setLoading(true)
@@ -189,8 +258,7 @@ export function ProductionRunForm({
 
     // Atomic database transaction: all run fields, raw consumption, finished
     // output and physical rolls roll back together on any error.
-    const { error } = await supabase.rpc('post_production_run', {
-      p_run: {
+    const runPayload = {
         run_date: form.run_date,
         shift: form.shift,
         machine_id: form.machine_id,
@@ -201,7 +269,7 @@ export function ProductionRunForm({
         film_width: form.film_width ? parseFloat(form.film_width) : null,
         film_color: form.film_color || null,
         output_quantity: rollMode ? parsedWeights.length : parseFloat(form.output_quantity),
-        output_unit: rollMode ? 'rolls' : form.output_unit,
+        output_unit: outputProduct.unit,
         roll_weights: rollMode ? parsedWeights : null,
         input_product_id: isConversion ? (form.input_product_id || null) : null,
         input_quantity_consumed: isConversion ? (selectedInputProduct?.unit==='rolls' ? selectedInputRollIds.length : (parseFloat(form.input_quantity_consumed) || 0)) : 0,
@@ -248,9 +316,14 @@ export function ProductionRunForm({
         waste_quantity: parseFloat(form.waste_quantity) || 0,
         notes: form.notes || null,
         created_by: user?.id,
-      },
-      p_materials: materialRows,
-    })
+      }
+    // Both paths are atomic. Multi-output posting consumes the selected inputs
+    // once, then credits each additional product and its individual rolls.
+    const { error } = additionalOutputs.length > 0
+      ? await supabase.rpc('post_multi_production_run', {
+          p_run: runPayload, p_materials: materialRows, p_additional_outputs: moreOutputs,
+        })
+      : await supabase.rpc('post_production_run', { p_run: runPayload, p_materials: materialRows })
     if (error) {
       setLoading(false)
       addToast(error.message, 'error')
@@ -389,14 +462,10 @@ export function ProductionRunForm({
               onChange={(e) => setForm({ ...form, output_quantity: e.target.value })}
               required
             />
-            <Select
-              label="Output Unit"
-              value={form.output_unit}
-              onChange={(e) => setForm({ ...form, output_unit: e.target.value as 'kg' | 'rolls' })}
-            >
-              <option value="kg">Kilograms</option>
-              <option value="rolls">Rolls</option>
-            </Select>
+            <div>
+              <p className="label">Stock Unit</p>
+              <p className="input flex items-center bg-slate-50">{outputProduct?.unit || 'Select a product'}</p>
+            </div>
             <Input
               label="Batch ID"
               value={form.batch_id}
@@ -404,6 +473,69 @@ export function ProductionRunForm({
             />
           </div>
         )}
+
+        <section aria-label="Additional production outputs" className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Additional Products</h3>
+              <p className="text-xs text-slate-600">
+                Add other {isConversion ? 'finished' : 'semi-finished'} products produced in the same run.
+                Materials or conversion inputs are deducted once for the entire report.
+              </p>
+            </div>
+            <Button type="button" variant="secondary" disabled={additionalOutputs.length >= 19 || outputOptions.length === 0}
+              onClick={() => setAdditionalOutputs((list) => [...list, emptyAdditionalOutput()])}>
+              + Add Product
+            </Button>
+          </div>
+          {additionalOutputs.map((line, index) => {
+            const product = outputOptions.find((g) => g.id === line.finished_good_id)
+            const isRoll = product?.unit === 'rolls'
+            const weights = parseRollWeights(line.roll_weights_text)
+            return (
+              <div key={line.key} className="space-y-3 rounded-lg border border-slate-200 bg-white p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold">Output {index + 2}</p>
+                  <Button type="button" variant="secondary" onClick={() => setAdditionalOutputs((items) => items.filter((o) => o.key !== line.key))}>
+                    Remove
+                  </Button>
+                </div>
+                <Select label="Product" required value={line.finished_good_id}
+                  onChange={(e) => updateOutput(line.key, {
+                    finished_good_id: e.target.value, output_quantity: '', roll_weights_text: '',
+                  })}>
+                  <option value="">— Select product —</option>
+                  {outputOptions.map((g) => <option key={g.id} value={g.id}>{g.product_name} ({g.unit})</option>)}
+                </Select>
+                {isRoll ? (
+                  <div>
+                    <label htmlFor={`output-rolls-${line.key}`} className="label">Individual roll weights (kg)</label>
+                    <textarea id={`output-rolls-${line.key}`} required className="input min-h-[4rem]"
+                      placeholder="12.3, 14.6, 20" value={line.roll_weights_text}
+                      onChange={(e) => updateOutput(line.key, { roll_weights_text: e.target.value })} />
+                    <p className="text-xs text-slate-500 mt-1">{weights.length} rolls · {weights.reduce((sum, w) => sum + (Number.isFinite(w) ? w : 0), 0).toFixed(2)} kg</p>
+                  </div>
+                ) : (
+                  <Input label={`Quantity${product ? ` (${product.unit})` : ''}`} type="number" min="0.01" step="0.01" required
+                    value={line.output_quantity} onChange={(e) => updateOutput(line.key, { output_quantity: e.target.value })} />
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Input label="Batch ID" value={line.batch_id} onChange={(e) => updateOutput(line.key, { batch_id: e.target.value })} />
+                  <Select label="Quality Grade" value={line.quality_grade}
+                    onChange={(e) => updateOutput(line.key, { quality_grade: e.target.value })}>
+                    <option value="">— Not recorded —</option>
+                    <option value="1">1 — Best</option><option value="2">2</option><option value="3">3 — Lowest</option>
+                  </Select>
+                  <Input label="Thickness (µ)" type="number" step="0.01" min="0" value={line.film_thickness}
+                    onChange={(e) => updateOutput(line.key, { film_thickness: e.target.value })} />
+                  <Input label="Width (mm)" type="number" step="0.01" min="0" value={line.film_width}
+                    onChange={(e) => updateOutput(line.key, { film_width: e.target.value })} />
+                  <Input label="Colour" value={line.film_color} onChange={(e) => updateOutput(line.key, { film_color: e.target.value })} />
+                </div>
+              </div>
+            )
+          })}
+        </section>
 
         {isConversion ? (
           <div className="border-t pt-4">

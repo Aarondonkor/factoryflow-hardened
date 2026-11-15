@@ -36,7 +36,7 @@ export function ProductionPage() {
       supabase
         .from('production_runs')
         .select(
-          '*, machines(machine_code, name, stage), finished_goods:finished_goods!production_runs_finished_good_id_fkey(product_name, stage), input_product:finished_goods!production_runs_input_product_id_fkey(product_name), production_run_materials(quantity_kg, raw_materials(name))'
+          '*, machines(machine_code, name, stage), finished_goods:finished_goods!production_runs_finished_good_id_fkey(product_name, stage), input_product:finished_goods!production_runs_input_product_id_fkey(product_name), production_run_materials(quantity_kg, raw_materials(name)), production_run_additional_outputs(id, output_quantity, output_unit, roll_weights, batch_id, finished_goods(product_name,stage))'
         )
         .order('run_date', { ascending: false })
         .limit(50),
@@ -73,8 +73,11 @@ export function ProductionPage() {
 
   const extrusionRuns=runs.filter(r=>(r.machines as Machine)?.stage === 'extrusion')
   const totalOutputKg=extrusionRuns.reduce((sum,r)=>sum + (r.output_unit==='kg'
-    ? r.output_quantity : (r.roll_weights||[]).reduce((s,kg)=>s+kg,0)),0)
-  const totalRolls=runs.filter(r=>r.output_unit==='rolls').reduce((sum,r)=>sum+r.output_quantity,0)
+    ? r.output_quantity : (r.roll_weights||[]).reduce((s,kg)=>s+kg,0)) +
+    (r.production_run_additional_outputs||[]).reduce((s,o)=>s+(o.output_unit==='kg'
+      ? o.output_quantity : (o.roll_weights||[]).reduce((n,w)=>n+w,0)),0),0)
+  const totalRolls=runs.reduce((sum,r)=>sum + (r.output_unit==='rolls'?r.output_quantity:0) +
+    (r.production_run_additional_outputs||[]).reduce((s,o)=>s+(o.output_unit==='rolls'?o.output_quantity:0),0),0)
   const totalWaste=extrusionRuns.reduce((sum,r)=>sum+r.waste_quantity,0)
   const totalInput=extrusionRuns.reduce((sum,r)=>sum+(r.production_run_materials||[]).reduce((s,m)=>s+m.quantity_kg,0),0)
   const yieldPercent=totalInput>0?totalOutputKg*100/totalInput:0
@@ -129,6 +132,11 @@ export function ProductionPage() {
             {runs.map((r) => {
               const isConversion = (r.machines as Machine)?.stage === 'conversion'
               const materialsTotal = (r.production_run_materials || []).reduce((s, m) => s + m.quantity_kg, 0)
+              const additional = r.production_run_additional_outputs || []
+              const outputLines = [
+                { id: r.id, name: r.finished_goods?.product_name || '—', qty: r.output_quantity, unit: r.output_unit, batch: r.batch_id },
+                ...additional.map((o) => ({ id: o.id, name: o.finished_goods?.product_name || '—', qty: o.output_quantity, unit: o.output_unit, batch: o.batch_id })),
+              ]
               const consumedLabel = isConversion
                 ? `${formatNumber(r.input_quantity_consumed)} ${(r.input_product as FinishedGood)?.product_name || 'input'}`
                 : `${formatNumber(materialsTotal)} kg materials`
@@ -140,8 +148,8 @@ export function ProductionPage() {
                     SHIFT_LABELS[r.shift],
                     (r.machines as Machine)?.machine_code || '—',
                     r.operator_name,
-                    r.finished_goods?.product_name || '—',
-                    `${formatNumber(r.output_quantity)} ${r.output_unit}`,
+                    outputLines.map((line, i) => <p key={line.id} className={i ? 'text-xs mt-1' : 'font-medium'}>{line.name}{line.batch ? ` · ${line.batch}` : ''}</p>),
+                    outputLines.map((line, i) => <p key={line.id} className={i ? 'text-xs mt-1' : 'font-medium'}>{formatNumber(line.qty)} {line.unit}</p>),
                     consumedLabel,
                     `${formatNumber(r.waste_quantity)} kg`,
                   ]}
@@ -149,7 +157,7 @@ export function ProductionPage() {
                     <div className="space-y-1 text-sm">
                       <div className="flex justify-between font-medium">
                         <span>{formatDate(r.run_date)} · {SHIFT_LABELS[r.shift]}</span>
-                        <span>{formatNumber(r.output_quantity)} {r.output_unit}</span>
+                        <span>{formatNumber(r.output_quantity)} {r.output_unit}{additional.length ? ` + ${additional.length} more` : ''}</span>
                       </div>
                       <p className="text-xs text-slate-500">
                         {(r.machines as Machine)?.name} · {r.operator_name}
@@ -157,6 +165,7 @@ export function ProductionPage() {
                       <p className="text-xs text-slate-500">
                         {r.finished_goods?.product_name || '—'} {isConversion ? `← ${(r.input_product as FinishedGood)?.product_name || 'input'}` : ''}
                       </p>
+                      {additional.map((o) => <p key={o.id} className="text-xs text-slate-500">+ {o.finished_goods?.product_name || 'Product'}: {formatNumber(o.output_quantity)} {o.output_unit}</p>)}
                     </div>
                   }
                 />
