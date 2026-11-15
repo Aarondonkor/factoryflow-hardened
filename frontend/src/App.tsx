@@ -15,6 +15,7 @@ import { InventoryPage } from '@/pages/inventory/InventoryPage'
 import { SalesPage } from '@/pages/sales/SalesPage'
 import { HRPage } from '@/pages/hr/HRPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { StaffSignupPage } from '@/pages/StaffSignupPage'
 
 export default function App() {
   const initialize = useAuthStore((s) => s.initialize)
@@ -27,6 +28,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/staff/signup" element={<StaffSignupPage />} />
         <Route path="/customer/signup" element={<CustomerSignupPage />} />
 
         <Route

@@ -21,6 +21,7 @@ interface AuthState {
     contactPhone: string
     address: string
   }) => Promise<{ error: string | null }>
+  signUpStaff: (params: { email: string; password: string; code: string }) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
   hasRole: (...roles: UserRole[]) => boolean
   canAccessModule: (module: 'dashboard' | 'production' | 'inventory' | 'sales' | 'hr' | 'settings') => boolean
@@ -88,6 +89,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           contact_phone: contactPhone,
           address,
         },
+      },
+    })
+    return { error: error?.message ?? null }
+  },
+
+  signUpStaff: async ({ email, password, code }) => {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/login`,
+        data: { employee_registration_code: code },
       },
     })
     return { error: error?.message ?? null }

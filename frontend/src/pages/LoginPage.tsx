@@ -77,7 +77,7 @@ export function LoginPage() {
                 Welcome back
               </h1>
               <p className="mt-1.5 text-sm text-slate-500">
-                Sign in to {BRAND.appName}. Staff accounts are invited by an administrator.
+                Sign in to {BRAND.appName}. Employees register using a one-time code issued by an administrator.
               </p>
             </div>
 
@@ -103,6 +103,11 @@ export function LoginPage() {
                 Sign In
               </Button>
             </form>
+
+            <p className="mt-3 text-center text-sm text-slate-500">
+              Work at {BRAND.shortName}?{' '}
+              <Link to="/staff/signup" className="font-semibold text-brand-700 hover:text-brand-800 hover:underline">Employee Sign Up</Link>
+            </p>
 
             <p className="mt-3 text-center text-sm text-slate-500">
               Ordering as a customer?{' '}

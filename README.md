@@ -14,7 +14,7 @@ npm ci
 npm run dev
 ```
 
-Do not place a Paystack **secret**, Supabase `service_role` credential or scheduler token in the browser `.env` or a `VITE_` variable. Paystack checkouts and staff invitations use server-side Supabase Edge Functions. Copy `supabase/migrations/` into a **staging** Supabase project, apply sequentially and deploy the named functions as detailed in the deployment guide.
+Do not place a Paystack **secret**, Supabase `service_role` credential or scheduler token in the browser `.env` or a `VITE_` variable. Paystack checkouts use server-side Supabase Edge Functions. Employees register using one-time administrator-issued codes validated by Supabase database triggers. Copy `supabase/migrations/` into a **staging** Supabase project, apply sequentially and deploy the named functions as detailed in the deployment guide.
 
 ## Quality checks
 
@@ -30,7 +30,7 @@ npm run build
 
 ## Major changes
 
-- No client-supplied privileged signup role; administrator invite and staff role controls.
+- No client-supplied privileged signup role; administrator-issued employee registration codes and staff role controls.
 - Direct mutation of order/payment/stock/production ledgers revoked; guarded database RPC workflows.
 - Atomic production runs and formula stock debits; physical roll selection for order and conversion usage.
 - Verified Paystack hosted checkout/webhook, replay-proof receipts, verified refunds and reconciliation endpoint.
@@ -43,6 +43,6 @@ npm run build
 
 `frontend/` — React SPA, local tests, Netlify/Vercel configs.  
 `supabase/migrations/` — all 21 ordered SQL migrations; this clean-install archive uses timestamped CLI-compatible filenames corresponding to logical migrations 001–021.  
-`supabase/functions/` — verified payment, refund, staff invitation and reconciler Edge functions.  
+`supabase/functions/` — verified payment, refund and reconciler Edge functions.  
 `scripts/preflight.sql`, `scripts/postflight.sql` — read-only migration and privilege sanity checks.  
 `DEPLOYMENT.md`, `SECURITY.md`, `TEST_PLAN.md` — release, privacy, and integration checklists.

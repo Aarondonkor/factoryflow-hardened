@@ -28,7 +28,7 @@ The seven local tests (`cd frontend && npm run test`) check pure date/format log
 | 22 | Submit duplicate same-day clock in / double open session | Unique constraint or RPC rejects without duplicate attendance |
 | 23 | Try to view employee salary/identity identifiers as customer and non-HR | RLS denies |
 | 24 | Open dialogs with keyboard; tab and Shift+Tab; Escape | Focus stays inside, closes/restores previous focus |
-| 25 | Test Netlify/Vercel headers, SPA deep links, login, admin invite and role changes | Secure HTTPS headers, no service keys in JS; navigation and API work |
+| 25 | Test Netlify/Vercel headers, SPA deep links, login, employee registration codes, rejection of invalid codes, role assignment and role changes | Secure HTTPS headers, no service keys in JS; navigation and API work |
 | 26 | Load thousands of orders and rolls; verify pagination/recent-list labels | Pages respond acceptably, server metrics correct across all records |
 
 Record a screenshot/SQL query of before+after data for #4, #6, #9, #13, #14, #17, and #21. Run `scripts/postflight.sql` after every staged migration release and have a second reviewer sign off on financial and warehouse totals.

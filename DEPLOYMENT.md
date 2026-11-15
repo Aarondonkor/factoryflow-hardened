@@ -12,7 +12,7 @@ This repository is **implementation-complete as a source patch** but **NOT valid
 4. Confirm migrations **001 through 016** match your actual database history. They are included for completeness. On an existing installation, apply only the new, **ordered migrations 017, 018, 019, 020, 021** once. Fresh projects need all 21 migrations in order. In this clean-install package, their **filenames have been normalized to 14-digit timestamp prefixes** so the CLI can track them; logical migration numbers 001–021 remain the same. Do not use this renamed set for an already-migrated project without reconciling its migration history.
 5. A confirmed order with an unresolved Paystack checkout cannot be cancelled until the attempt is reconciled. This avoids cancelling an order while a delayed provider settlement is still possible. A support review may be required for abandoned attempts.
 6. If legacy records violate the new constraints, repair them via a documented, approved data-cleaning migration on a copy. `017` may reject duplicate employee profiles or invalid balances; `019` may reject multiple open clock sessions.
-6. Review the already-granted admin accounts. New public registrations are **always customers**, regardless of the user-supplied metadata `role`. Invite new staff from Settings as an existing admin. Bootstrap the first admin using an out-of-band SQL Editor session; never expose a signup role selector.
+6. Review the already-granted admin accounts. Ordinary public registrations become **customers** regardless of the user-supplied `role`. Employee registration requires an unexpired, one-use code created by an admin in Settings; the assigned role comes from the code record, never client metadata. Bootstrap the first admin using an out-of-band SQL Editor session; never expose a signup role selector.
 
 ### Database deployment
 
@@ -31,7 +31,6 @@ supabase functions deploy paystack-payment
 supabase functions deploy paystack-webhook --no-verify-jwt
 supabase functions deploy paystack-refund
 supabase functions deploy reconcile-payments --no-verify-jwt
-supabase functions deploy admin-invite-staff
 ```
 
 Set secrets using Supabase project secret management; **never** place them in `.env` committed to Git or any `VITE_` prefixed variable:

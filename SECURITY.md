@@ -1,6 +1,6 @@
 # FactoryFlow Security, Privacy and Operations Policy (implementation baseline)
 
-**Access:** Auth and roles are derived exclusively from trusted Supabase profiles and authorization checks inside SECURITY DEFINER functions. Public registrations are customers awaiting approval. Administrators issue staff invitations, and special direct database access must be logged and limited. Conduct monthly reviews of administrator, HR and sales accounts; deactivate departed staff accounts.
+**Access:** Auth and roles are derived exclusively from trusted Supabase profiles and authorization checks inside SECURITY DEFINER functions. Uncoded public registrations are customers awaiting approval. Employees can register only with a single-use, short-lived, email-bound code issued by an administrator; the verified code record supplies the staff role. Direct database access must be logged and limited. Conduct monthly reviews of administrator, HR and sales accounts; deactivate departed staff accounts.
 
 **Payments:** Never persist Paystack secret keys in the SPA, Git or local browser storage. Log only transaction references, amounts, currency, order and provider status; avoid full payment card numbers, session tokens or private webhook contents. Store all keys in Supabase Edge Function secrets. Paystack settlement/refunds must be independently verified, with webhook signature verification and a periodic reconciliation job. Compare provider settlements, cash deposits, bank transfers, refunds and your payment ledger daily.
 

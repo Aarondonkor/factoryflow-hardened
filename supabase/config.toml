@@ -21,9 +21,6 @@ verify_jwt = true
 [functions.paystack-webhook]
 verify_jwt = false # Paystack's HMAC signature is verified in the function.
 
-[functions.admin-invite-staff]
-verify_jwt = true
-
 [functions.paystack-refund]
 verify_jwt = true
 

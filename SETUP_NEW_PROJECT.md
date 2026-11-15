@@ -48,7 +48,7 @@ COMMIT;
 SELECT id, email, role FROM public.profiles WHERE lower(email) = lower('your-admin-email@example.com');
 ```
 
-The SELECT must return exactly one row with role `admin`. This one-time SQL Editor step is only for the **first** admin. Add future staff through the admin invitation workflow. Never expose administrator creation to public signup.
+The SELECT must return exactly one row with role `admin`. This one-time SQL Editor step is only for the **first** admin. Register future employees with one-time admin-generated codes in Settings → Generate Employee Registration Code. Never expose administrator creation to public signup.
 
 ## D. Deploy the Netlify frontend
 
@@ -75,7 +75,6 @@ Supabase → Authentication → URL Configuration: set the **Site URL** to your 
 From the same Git repository root:
 
 ```powershell
-npx supabase functions deploy admin-invite-staff
 npx supabase functions deploy paystack-payment
 npx supabase functions deploy paystack-refund
 npx supabase functions deploy paystack-webhook --no-verify-jwt
