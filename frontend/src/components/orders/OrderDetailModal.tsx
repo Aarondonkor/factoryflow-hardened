@@ -23,6 +23,8 @@ export function OrderDetailModal({ order, onClose, canPay = false }: OrderDetail
   const [loading, setLoading] = useState(true)
   const [paying, setPaying] = useState(false)
   const balance = order.balance_due
+  const depositDue = order.fulfillment_mode==='made_to_order' && order.status==='pending'
+    ? Math.max(0,Number(order.deposit_required)-Number(order.amount_paid)) : 0
   const [rolls, setRolls] = useState<ProductRoll[]>([])
 
   const fetchPayments = async () => {
@@ -76,6 +78,12 @@ export function OrderDetailModal({ order, onClose, canPay = false }: OrderDetail
           <span className="text-sm text-slate-500">Placed {formatDate(order.created_at)}</span>
         </div>
 
+        {order.fulfillment_mode==='made_to_order' && <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+          <p className="font-semibold">Made-to-order production: {order.production_rolls_requested} rolls ({formatKg(order.production_target_kg||0)} nominal)</p>
+          <p>Required advance deposit: {formatCurrency(order.deposit_required)} · {depositDue>0?`Still due: ${formatCurrency(depositDue)}`:'Deposit requirement met'}</p>
+          <p>Physical roll weights will be confirmed after production.</p>
+        </div>}
+
         {(order.delivery_date || order.notes) && (
           <div className="text-sm text-slate-600 space-y-1">
             {order.delivery_date && <p>Delivery date: {formatDate(order.delivery_date)}</p>}
@@ -100,7 +108,9 @@ export function OrderDetailModal({ order, onClose, canPay = false }: OrderDetail
                       <p className="text-xs text-slate-500">
                         {isRollLine
                           ? `${itemRolls.length} roll${itemRolls.length === 1 ? '' : 's'} · ${formatKg(item.quantity)} × ${formatCurrency(item.unit_price)} / kg`
-                          : `${item.quantity} × ${formatCurrency(item.unit_price)}`}
+                          : order.fulfillment_mode==='made_to_order'
+                            ? `${formatKg(item.quantity)} (${order.production_rolls_requested} rolls requested) × ${formatCurrency(item.unit_price)} / kg`
+                            : `${item.quantity} × ${formatCurrency(item.unit_price)}`}
                       </p>
                     </div>
                     <span className="font-semibold text-slate-800">{formatCurrency(item.line_total)}</span>
@@ -165,9 +175,12 @@ export function OrderDetailModal({ order, onClose, canPay = false }: OrderDetail
 
         <div className="flex justify-end gap-3 pt-2 border-t">
           <Button variant="secondary" onClick={onClose}>Close</Button>
-          {canPay && balance > 0 && order.status === 'pending' && (
+          {canPay && depositDue>0 && <Button loading={paying} onClick={handlePay}>
+            Pay 50% Deposit — {formatCurrency(depositDue)}
+          </Button>}
+          {canPay && balance > 0 && order.status === 'pending' && depositDue===0 && (
             <p className="mr-auto self-center text-xs text-slate-500">
-              You can pay once we've confirmed your order.
+              {order.fulfillment_mode==='made_to_order' ? 'Your production order is awaiting factory confirmation.' : "You can pay once we've confirmed your order."}
             </p>
           )}
           {canPay && balance > 0 && order.status !== 'pending' && order.status !== 'cancelled' && (

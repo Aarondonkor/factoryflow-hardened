@@ -50,7 +50,9 @@ export function RollDetailModal({ roll, onClose }: RollDetailModalProps) {
           <h3 className="font-semibold text-brand-900">Individual roll</h3>
           <dl className="grid grid-cols-1 gap-x-5 sm:grid-cols-2">
             <Detail label="Roll number" value={`#${roll.roll_no}`} />
-            <Detail label="Weight" value={formatKg(Number(roll.weight_kg))} />
+            <Detail label="Remaining weight" value={formatKg(Number(roll.weight_kg))} />
+            <Detail label="Original weight" value={formatKg(Number(roll.original_weight_kg ?? roll.weight_kg))} />
+            <Detail label="Used in conversion" value={formatKg(Math.max(0,Number(roll.original_weight_kg ?? roll.weight_kg)-Number(roll.weight_kg)))} />
             <Detail label="Thickness (micron)" value={roll.micron != null ? `${roll.micron} µ` : 'Not recorded'} />
             <Detail label="Specification width" value={roll.product_spec_width != null ? `${roll.product_spec_width} mm` : 'Not recorded'} />
             <Detail label="Product colour" value={roll.product_color || 'Not recorded'} />

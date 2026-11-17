@@ -97,7 +97,17 @@ export interface ProductionRunAdditionalOutput {
   film_width: number | null
   film_color: string | null
   quality_grade: number | null
+  input_product_id: string | null
+  input_quantity_consumed: number | null
+  input_product?: Pick<FinishedGood, 'product_name' | 'unit'>
   finished_goods?: Pick<FinishedGood, 'product_name' | 'stage'>
+}
+
+export interface ProductionRunRollAllocation {
+  input_roll_id: string
+  production_output_id: string | null
+  consumed_weight_kg: number
+  product_rolls?: {roll_no: number} | null
 }
 
 export interface ProductionRun {
@@ -119,6 +129,7 @@ export interface ProductionRun {
   additive_consumed: number
   input_product_id: string | null
   input_quantity_consumed: number
+  input_accounting_mode?: 'standard' | 'allocated_kg'
   roll_weights: number[] | null
   process_type: ConversionProcessType | null
 
@@ -168,6 +179,7 @@ export interface ProductionRun {
   input_product?: FinishedGood
   production_run_materials?: ProductionRunMaterial[]
   production_run_additional_outputs?: ProductionRunAdditionalOutput[]
+  production_run_roll_allocations?: ProductionRunRollAllocation[]
 }
 
 export interface MachineDowntime {
@@ -211,6 +223,10 @@ export interface Order {
   order_number: string
   customer_id: string
   status: OrderStatus
+  fulfillment_mode: 'stock' | 'made_to_order'
+  production_rolls_requested: number | null
+  production_target_kg: number | null
+  deposit_required: number
   delivery_date: string | null
   delivery_status: 'pending' | 'dispatched' | 'delivered'
   subtotal: number
@@ -327,6 +343,7 @@ export interface ProductRoll {
   finished_good_id: string
   production_run_id: string | null
   weight_kg: number
+  original_weight_kg?: number
   micron: number | null
   status: RollStatus
   order_item_id: string | null

@@ -16,6 +16,7 @@ import { OrderFormModal } from './OrderFormModal'
 import { PaymentModal } from './PaymentModal'
 import { RefundModal } from './RefundModal'
 import { OrderDetailModal } from '@/components/orders/OrderDetailModal'
+import { ProductionRollAllocationModal } from '@/components/orders/ProductionRollAllocationModal'
 import { verifyReturnedPayment } from '@/lib/paystack'
 
 type Tab = 'orders' | 'customers' | 'payments'
@@ -31,6 +32,7 @@ export function SalesPage() {
   const [showOrderForm, setShowOrderForm] = useState(false)
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null)
   const [detailOrder, setDetailOrder] = useState<Order | null>(null)
+  const [allocationOrder,setAllocationOrder]=useState<Order|null>(null)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [refundPayment,setRefundPayment]=useState<Payment | null>(null)
   const [refunds,setRefunds]=useState<Record<string,number>>({})
@@ -174,9 +176,11 @@ export function SalesPage() {
                   formatCurrency(o.total),
                   formatCurrency(o.amount_paid),
                   formatCurrency(o.balance_due),
-                  <Badge variant={getOrderStatusBadge(o.status)}>
+                  <div className="space-y-1"><Badge variant={getOrderStatusBadge(o.status)}>
                     {ORDER_STATUS_LABELS[o.status]}
-                  </Badge>,
+                  </Badge>{o.fulfillment_mode==='made_to_order'&&<p className="text-xs text-slate-600">
+                    {o.amount_paid<o.deposit_required ? 'Awaiting deposit' : `${o.production_rolls_requested} rolls · Production order`}
+                  </p>}</div>,
                   <Badge variant={getDeliveryStatusBadge(o.delivery_status)}>
                     {DELIVERY_STATUS_LABELS[o.delivery_status]}
                   </Badge>,
@@ -185,8 +189,14 @@ export function SalesPage() {
                       View
                     </Button>
                     {canWrite && o.status === 'pending' && (
-                      <Button variant="secondary" onClick={() => changeOrder(o.id, 'confirm')}>Confirm</Button>
+                      <Button variant="secondary" disabled={o.fulfillment_mode==='made_to_order' && o.amount_paid<o.deposit_required}
+                        title={o.fulfillment_mode==='made_to_order'&&o.amount_paid<o.deposit_required?'Awaiting required deposit':undefined}
+                        onClick={() => changeOrder(o.id, 'confirm')}>
+                        {o.fulfillment_mode==='made_to_order'&&o.amount_paid<o.deposit_required?'Deposit Required':'Confirm'}
+                      </Button>
                     )}
+                    {canWrite && o.fulfillment_mode==='made_to_order' && ['confirmed','in_production'].includes(o.status) &&
+                      <Button variant="secondary" onClick={()=>setAllocationOrder(o)}>Allocate Rolls</Button>}
                     {canWrite && ['pending','confirmed','in_production'].includes(o.status) && o.amount_paid===0 && (
                       <Button variant="secondary" onClick={()=>changeOrder(o.id,'cancel')}>Cancel</Button>
                     )}
@@ -411,6 +421,9 @@ export function SalesPage() {
           }}
         />
       )}
+
+      {allocationOrder && <ProductionRollAllocationModal order={allocationOrder}
+        onClose={()=>setAllocationOrder(null)} onAllocated={()=>fetchData()}/>}
 
       {detailOrder && (
         <OrderDetailModal

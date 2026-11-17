@@ -36,7 +36,7 @@ export function ProductionPage() {
       supabase
         .from('production_runs')
         .select(
-          '*, machines(machine_code, name, stage), finished_goods:finished_goods!production_runs_finished_good_id_fkey(product_name, stage), input_product:finished_goods!production_runs_input_product_id_fkey(product_name), production_run_materials(quantity_kg, raw_materials(name)), production_run_additional_outputs(id, output_quantity, output_unit, roll_weights, batch_id, finished_goods(product_name,stage))'
+          '*, machines(machine_code, name, stage), finished_goods:finished_goods!production_runs_finished_good_id_fkey(product_name, stage), input_product:finished_goods!production_runs_input_product_id_fkey(product_name), production_run_materials(quantity_kg, raw_materials(name)), production_run_additional_outputs(id, output_quantity, output_unit, roll_weights, batch_id, input_product_id, input_quantity_consumed, input_product:finished_goods!production_run_additional_outputs_input_product_id_fkey(product_name,unit), finished_goods(product_name,stage)), production_run_roll_allocations(input_roll_id,consumed_weight_kg,production_output_id,product_rolls:product_rolls!production_run_roll_allocations_input_roll_id_fkey(roll_no))'
         )
         .order('run_date', { ascending: false })
         .limit(50),
@@ -137,8 +137,18 @@ export function ProductionPage() {
                 { id: r.id, name: r.finished_goods?.product_name || '—', qty: r.output_quantity, unit: r.output_unit, batch: r.batch_id },
                 ...additional.map((o) => ({ id: o.id, name: o.finished_goods?.product_name || '—', qty: o.output_quantity, unit: o.output_unit, batch: o.batch_id })),
               ]
+              const rollParts = r.production_run_roll_allocations || []
+              const partsLabel = (outputId: string | null) => rollParts
+                .filter(p => p.production_output_id === outputId)
+                .map(p => `#${p.product_rolls?.roll_no ?? p.input_roll_id.slice(0,8)} (${formatNumber(p.consumed_weight_kg)} kg)`)
+                .join(', ')
               const consumedLabel = isConversion
-                ? `${formatNumber(r.input_quantity_consumed)} ${(r.input_product as FinishedGood)?.product_name || 'input'}`
+                ? [
+                    `${formatNumber(r.input_quantity_consumed)} ${r.input_accounting_mode === 'allocated_kg' ? 'kg of' : 'units of'} ${(r.input_product as FinishedGood)?.product_name || 'input'} (primary)${partsLabel(null) ? ` · Rolls: ${partsLabel(null)}` : ''}`,
+                    ...additional.map((o,i) => o.input_product_id
+                      ? `${formatNumber(o.input_quantity_consumed || 0)} ${r.input_accounting_mode === 'allocated_kg' ? 'kg of' : 'units of'} ${o.input_product?.product_name || 'input'} (output ${i + 2})${partsLabel(o.id) ? ` · Rolls: ${partsLabel(o.id)}` : ''}`
+                      : 'Additional output: historical input not separately recorded'),
+                  ].join(' · ')
                 : `${formatNumber(materialsTotal)} kg materials`
               return (
                 <TableRow
@@ -165,7 +175,12 @@ export function ProductionPage() {
                       <p className="text-xs text-slate-500">
                         {r.finished_goods?.product_name || '—'} {isConversion ? `← ${(r.input_product as FinishedGood)?.product_name || 'input'}` : ''}
                       </p>
-                      {additional.map((o) => <p key={o.id} className="text-xs text-slate-500">+ {o.finished_goods?.product_name || 'Product'}: {formatNumber(o.output_quantity)} {o.output_unit}</p>)}
+                      {additional.map((o) => <p key={o.id} className="text-xs text-slate-500">
+                        + {o.finished_goods?.product_name || 'Product'}: {formatNumber(o.output_quantity)} {o.output_unit}
+                        {isConversion && ` ← ${o.input_product_id
+                          ? `${formatNumber(o.input_quantity_consumed || 0)} ${r.input_accounting_mode === 'allocated_kg' ? 'kg of' : 'units of'} ${o.input_product?.product_name || 'semi-finished input'}`
+                          : 'historical input not recorded'}`}
+                      </p>)}
                     </div>
                   }
                 />

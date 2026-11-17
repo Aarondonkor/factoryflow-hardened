@@ -25,7 +25,7 @@ async function signatureValid(req: Request, body: Uint8Array) {
     const message=new Uint8Array(prefix.length+body.length)
     message.set(prefix);message.set(body,prefix.length)
     const expected=await hmac(secret,message)
-    return parts.some(p=>p.startsWith('v1=') && equalHex(p.slice(p.indexOf(':')+1),expected))
+    return parts.some(p=>p.startsWith('v1=') && equalHex(p.slice(3),expected))
   }
   const legacy=req.headers.get('x-paystack-signature')
   if (!legacy || !PAYSTACK_SECRET_KEY) return false

@@ -14,8 +14,9 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { PageTabs } from '@/components/ui/PageTabs'
 import { OrderDetailModal } from '@/components/orders/OrderDetailModal'
 import { verifyReturnedPayment } from '@/lib/paystack'
+import { CustomerStockPage, type CustomerStock } from './CustomerStockPage'
 
-type Tab = 'place-order' | 'my-orders'
+type Tab = 'my-stock' | 'place-order' | 'my-orders'
 
 interface CartLine {
   finished_good_id: string
@@ -30,10 +31,11 @@ function unitLabel(g: FinishedGood) {
 export function CustomerPortalPage() {
   const addToast = useToastStore((s) => s.addToast)
 
-  const [tab, setTab] = useState<Tab>('place-order')
+  const [tab, setTab] = useState<Tab>('my-stock')
   const [company, setCompany] = useState<Customer | null>(null)
   const [products, setProducts] = useState<FinishedGood[]>([])
   const [orders, setOrders] = useState<Order[]>([])
+  const [customerStock, setCustomerStock] = useState<CustomerStock[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
 
@@ -55,7 +57,7 @@ export function CustomerPortalPage() {
 
   const fetchData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
-    const [companyRes, productsRes, ordersRes, availRes, ownRes] = await Promise.all([
+    const [companyRes, productsRes, ordersRes, availRes, ownRes, stockRes] = await Promise.all([
       supabase.from('customers').select('*').maybeSingle(),
       supabase.from('finished_goods').select('*').order('product_name'),
       supabase
@@ -64,9 +66,10 @@ export function CustomerPortalPage() {
         .order('created_at', { ascending: false }),
       supabase.from('product_rolls').select('*').eq('status', 'available').order('roll_no'),
       supabase.from('product_rolls').select('*').not('order_item_id', 'is', null),
+      supabase.rpc('customer_available_stock'),
     ])
 
-    const failure = [companyRes,productsRes,ordersRes,availRes,ownRes].find(r=>r.error)
+    const failure = [companyRes,productsRes,ordersRes,availRes,ownRes,stockRes].find(r=>r.error)
     if (failure?.error) { setFetchError(failure.error.message);setLoading(false);return }
     setFetchError(null)
     setCompany(companyRes.data || null)
@@ -74,6 +77,7 @@ export function CustomerPortalPage() {
     setOrders(ordersRes.data || [])
     setAvailableRolls(availRes.data || [])
     setOwnRolls(ownRes.data || [])
+    setCustomerStock(stockRes.data || [])
     // Drop any picked roll that someone else has taken since we last looked.
     const stillAvailable = new Set([...(availRes.data || []).map(r=>r.id),
       ...(ownRes.data || []).filter(r=>r.status==='reserved').map(r=>r.id)])
@@ -170,7 +174,7 @@ export function CustomerPortalPage() {
   }
 
   const startEditOrder = (order: Order) => {
-    if (order.status !== 'pending') return
+    if (order.status !== 'pending' || order.fulfillment_mode==='made_to_order') return
     const lines = order.order_items || []
     setEditingOrderId(order.id)
     setDeliveryDate(order.delivery_date || toInputDate())
@@ -197,6 +201,8 @@ export function CustomerPortalPage() {
       const kg = itemRolls.reduce((sum, r) => sum + r.weight_kg, 0)
       return `${itemRolls.length} roll${itemRolls.length === 1 ? '' : 's'} (${formatKg(kg)}) × ${name}${formatItemSpec(it)}`
     }
+    if (it.order_id && orders.find(o=>o.id===it.order_id)?.fulfillment_mode==='made_to_order')
+      return `${formatKg(it.quantity)} × ${name} (production request)${formatItemSpec(it)}`
     return `${it.quantity} × ${name}${formatItemSpec(it)}`
   }
 
@@ -233,12 +239,16 @@ export function CustomerPortalPage() {
 
       <PageTabs
         tabs={[
+          { id: 'my-stock', label: 'My Stock' },
           { id: 'place-order', label: 'Place Order' },
           { id: 'my-orders', label: 'My Orders' },
         ]}
         active={tab}
         onChange={(id) => setTab(id as Tab)}
       />
+
+      {tab === 'my-stock' && <CustomerStockPage stock={customerStock} approved={isApproved}
+        onRefresh={()=>{void fetchData(true)}} onViewOrders={()=>setTab('my-orders')}/>}
 
       {tab === 'place-order' && (
         <Card title={editingOrderId ? "Edit Pending Order" : "Place an Order"}>
@@ -428,16 +438,22 @@ export function CustomerPortalPage() {
                   (o.order_items || []).map(describeItem).join(', ') || '—',
                   formatCurrency(o.total),
                   formatCurrency(o.balance_due),
-                  <Badge variant={getOrderStatusBadge(o.status)}>{ORDER_STATUS_LABELS[o.status]}</Badge>,
+                  <div className="space-y-1"><Badge variant={getOrderStatusBadge(o.status)}>{ORDER_STATUS_LABELS[o.status]}</Badge>
+                    {o.fulfillment_mode==='made_to_order' && <p className="text-xs text-slate-600">
+                      {o.status==='pending' && o.amount_paid<o.deposit_required ? 'Awaiting 50% deposit'
+                        : o.status==='pending' ? 'Awaiting factory confirmation' : 'Made to order'}
+                    </p>}</div>,
                   <Badge variant={getDeliveryStatusBadge(o.delivery_status)}>
                     {DELIVERY_STATUS_LABELS[o.delivery_status]}
                   </Badge>,
                   <div className="flex gap-2 flex-wrap">
                     <Button variant="secondary" onClick={() => setSelectedOrder(o)}>View</Button>
-                    {o.status==='pending' && <>
+                    {o.status==='pending' && o.fulfillment_mode!=='made_to_order' && <>
                       <Button variant="secondary" onClick={()=>startEditOrder(o)}>Edit</Button>
                       <Button variant="secondary" onClick={()=>cancelPendingOrder(o)}>Cancel</Button>
                     </>}
+                    {o.fulfillment_mode==='made_to_order' && o.status==='pending' && o.amount_paid===0 &&
+                      <Button variant="secondary" onClick={()=>cancelPendingOrder(o)}>Cancel</Button>}
                   </div>,
                 ]}
                 mobileCard={
@@ -460,10 +476,14 @@ export function CustomerPortalPage() {
                       <span className="font-semibold">{formatCurrency(o.total)}</span>
                     </div>
                     <Button variant="secondary" className="w-full" onClick={() => setSelectedOrder(o)}>View Order</Button>
-                    {o.status==='pending' && <div className="flex gap-2">
+                    {o.fulfillment_mode==='made_to_order' && <p className="text-xs text-slate-600">
+                      {o.status==='pending' && o.amount_paid<o.deposit_required?'Awaiting 50% deposit':`Production order · ${o.production_rolls_requested||0} rolls`}</p>}
+                    {o.status==='pending' && o.fulfillment_mode!=='made_to_order' && <div className="flex gap-2">
                       <Button variant="secondary" onClick={()=>startEditOrder(o)}>Edit</Button>
                       <Button variant="secondary" onClick={()=>cancelPendingOrder(o)}>Cancel</Button>
                     </div>}
+                    {o.fulfillment_mode==='made_to_order' && o.status==='pending' && o.amount_paid===0 &&
+                      <Button variant="secondary" onClick={()=>cancelPendingOrder(o)}>Cancel</Button>}
                   </div>
                 }
               />
