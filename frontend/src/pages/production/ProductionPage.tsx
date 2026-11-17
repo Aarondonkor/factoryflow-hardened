@@ -36,7 +36,7 @@ export function ProductionPage() {
       supabase
         .from('production_runs')
         .select(
-          '*, machines(machine_code, name, stage), finished_goods:finished_goods!production_runs_finished_good_id_fkey(product_name, stage), input_product:finished_goods!production_runs_input_product_id_fkey(product_name), production_run_materials(quantity_kg, raw_materials(name)), production_run_additional_outputs(id, output_quantity, output_unit, roll_weights, batch_id, input_product_id, input_quantity_consumed, input_product:finished_goods!production_run_additional_outputs_input_product_id_fkey(product_name,unit), finished_goods(product_name,stage)), production_run_roll_allocations(input_roll_id,consumed_weight_kg,production_output_id,product_rolls:product_rolls!production_run_roll_allocations_input_roll_id_fkey(roll_no))'
+          '*, machines(machine_code, name, stage), finished_goods:finished_goods!production_runs_finished_good_id_fkey(product_name, stage), input_product:finished_goods!production_runs_input_product_id_fkey(product_name), production_run_materials(quantity_kg, raw_materials(name)), production_run_additional_outputs(id, output_quantity, output_unit, roll_weights, batch_id, input_product_id, input_quantity_consumed, input_product:finished_goods!production_run_additional_outputs_input_product_id_fkey(product_name,unit), finished_goods:finished_goods!production_run_additional_outputs_finished_good_id_fkey(product_name,stage)), production_run_roll_allocations(input_roll_id,consumed_weight_kg,production_output_id,product_rolls:product_rolls!production_run_roll_allocations_input_roll_id_fkey(roll_no))'
         )
         .order('run_date', { ascending: false })
         .limit(50),
