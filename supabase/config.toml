@@ -16,7 +16,8 @@ enabled = true
 port = 54323
 
 [functions.paystack-payment]
-verify_jwt = true
+# The handler checks the caller's Supabase Auth JWT via userFromRequest().
+verify_jwt = false
 
 [functions.paystack-webhook]
 verify_jwt = false # Paystack's HMAC signature is verified in the function.

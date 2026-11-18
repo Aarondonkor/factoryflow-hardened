@@ -25,7 +25,16 @@ async function signatureValid(req: Request, body: Uint8Array) {
     const message=new Uint8Array(prefix.length+body.length)
     message.set(prefix);message.set(body,prefix.length)
     const expected=await hmac(secret,message)
-    return parts.some(p=>p.startsWith('v1=') && equalHex(p.slice(3),expected))
+    // Current Paystack signatures use v1=<key id>:<128-char HMAC hex>.
+    // Comparing the entire v1 value against the hex HMAC always fails.
+    return parts.some(part => {
+      if (!part.startsWith('v1=')) return false
+      const value = part.slice(3)
+      const colon = value.indexOf(':')
+      if (colon < 0 || !value.slice(0, colon).startsWith('whk_')) return false
+      const signature = value.slice(colon + 1)
+      return /^[a-f0-9]{128}$/.test(signature) && equalHex(signature, expected)
+    })
   }
   const legacy=req.headers.get('x-paystack-signature')
   if (!legacy || !PAYSTACK_SECRET_KEY) return false
