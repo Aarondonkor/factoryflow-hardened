@@ -52,7 +52,7 @@ export function InventoryPage() {
       supabase.from('raw_materials').select('*').order('name').limit(500),
       supabase.from('finished_goods').select('*').order('product_name').limit(500),
       supabase.from('stock_movements').select('*').order('created_at', { ascending: false }).limit(100),
-      supabase.from('customers').select('*').order('name').limit(500),
+      supabase.from('customers').select('*').or('owner_profile_id.is.null,approval_status.eq.approved').order('name').limit(500),
       isAdmin ? Promise.resolve({ data: [] as ProductRoll[], error: null }) : supabase.from('product_rolls').select('*').order('roll_no', { ascending: false }).limit(500),
     ])
 

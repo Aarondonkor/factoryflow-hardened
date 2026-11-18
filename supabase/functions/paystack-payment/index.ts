@@ -21,12 +21,13 @@ Deno.serve(async (req) => {
     if (body.action !== 'initialize') return response({ error: 'Unsupported action' }, 400, headers)
     const orderId = String(body.order_id || '')
     const { data: order, error } = await admin.from('orders')
-      .select('id,customer_id,order_number,status,balance_due,amount_paid,deposit_required,fulfillment_mode,customers(owner_profile_id,contact_email)')
+      .select('id,customer_id,order_number,status,balance_due,amount_paid,deposit_required,fulfillment_mode,customers(owner_profile_id,contact_email,approval_status)')
       .eq('id',orderId).single()
     if (error || !order) return response({ error: 'Order not found' }, 404, headers)
     const company = Array.isArray(order.customers) ? order.customers[0] : order.customers
     if (!['admin','sales_staff'].includes(role) && (role!=='customer' || company?.owner_profile_id!==user.id))
       return response({ error: 'Forbidden' }, 403, headers)
+    if (company?.approval_status !== 'approved') return response({ error: 'Customer approval required for checkout' }, 403, headers)
     if (order.status==='cancelled' || Number(order.balance_due)<=0)
       return response({ error: 'Order has no payable balance' }, 409, headers)
 

@@ -24,6 +24,8 @@ type Tab = 'orders' | 'customers' | 'payments'
 export function SalesPage() {
   const [tab, setTab] = useState<Tab>('orders')
   const [customers, setCustomers] = useState<Customer[]>([])
+  const [customerFilter,setCustomerFilter]=useState<'active'|'pending'|'rejected'>('active')
+  const [deletingCustomer,setDeletingCustomer]=useState<string|null>(null)
   const [orders, setOrders] = useState<Order[]>([])
   const [payments, setPayments] = useState<Payment[]>([])
   const [finishedGoods, setFinishedGoods] = useState<FinishedGood[]>([])
@@ -124,6 +126,26 @@ export function SalesPage() {
       fetchData()
     }
   }
+
+  const deleteRejected = async (customer: Customer) => {
+    if (!isAdmin || customer.approval_status !== 'rejected') return
+    if (!window.confirm(`Permanently delete rejected registration for ${customer.business_name || customer.name}? This will also remove its login if no business records are linked.`)) return
+    setDeletingCustomer(customer.id)
+    try {
+      const {data,error}=await supabase.functions.invoke('admin-delete-rejected-customer',{body:{customer_id:customer.id}})
+      if (error || !data?.ok) {
+        addToast(data?.error || error?.message || 'Deletion failed. Check linked business records.','error')
+      } else {
+        addToast('Rejected registration and login removed')
+        await fetchData()
+      }
+    } finally { setDeletingCustomer(null) }
+  }
+  const visibleCustomers = customers.filter(c => customerFilter === 'rejected'
+    ? c.approval_status === 'rejected'
+    : customerFilter === 'pending' ? c.owner_profile_id && c.approval_status === 'pending'
+    : !c.owner_profile_id || c.approval_status === 'approved')
+  const operationalCustomers=customers.filter(c=>!c.owner_profile_id || c.approval_status==='approved')
 
   const tabs = [
     { id: 'orders' as const, label: 'Orders' },
@@ -261,12 +283,20 @@ export function SalesPage() {
       )}
 
       {tab === 'customers' && (
-        <Card title="Customers">
+        <Card title="Customer registration review">
+          <div className="flex gap-2 flex-wrap mb-4" role="group" aria-label="Customer status filter">
+            {(['active','pending','rejected'] as const).map(filter => (
+              <Button key={filter} variant={customerFilter===filter?'primary':'secondary'}
+                onClick={()=>setCustomerFilter(filter)} aria-pressed={customerFilter===filter}>
+                {filter==='active'?'Active customers':filter==='pending'?'Pending applications':'Rejected applications'}
+              </Button>
+            ))}
+          </div>
           <ResponsiveTable
             headers={['Name', 'Business', 'Phone', 'Email', 'Credit Terms', 'Account', 'Actions']}
-            isEmpty={customers.length === 0}
+            isEmpty={visibleCustomers.length === 0}
           >
-            {customers.map((c) => (
+            {visibleCustomers.map((c) => (
               <TableRow
                 key={c.id}
                 cells={[
@@ -299,6 +329,9 @@ export function SalesPage() {
                         Reject
                       </Button>
                     </div>
+                  ) : isAdmin && c.approval_status === 'rejected' ? (
+                    <Button variant="danger" disabled={deletingCustomer===c.id}
+                      onClick={()=>void deleteRejected(c)}>Delete registration</Button>
                   ) : null,
                 ]}
                 mobileCard={
@@ -321,6 +354,10 @@ export function SalesPage() {
                     </div>
                     {c.business_name && <p className="text-xs text-slate-500">{c.business_name}</p>}
                     <p className="text-xs">{c.contact_phone}</p>
+                    {isAdmin && c.approval_status==='rejected' && (
+                      <Button variant="danger" disabled={deletingCustomer===c.id}
+                        onClick={()=>void deleteRejected(c)}>Delete registration</Button>
+                    )}
                     {canWrite && c.owner_profile_id && c.approval_status === 'pending' && (
                       <div className="flex gap-2 pt-1">
                         <Button variant="secondary" onClick={() => updateApprovalStatus(c.id, 'approved')}>
@@ -399,7 +436,7 @@ export function SalesPage() {
 
       {showOrderForm && (
         <OrderFormModal
-          customers={customers}
+          customers={operationalCustomers}
           finishedGoods={finishedGoods}
           onClose={() => setShowOrderForm(false)}
           onSuccess={() => {
