@@ -47,29 +47,29 @@ BEGIN
  END IF;
  WITH receipts AS (
    SELECT p.id,p.order_id,p.amount,p.payment_method::text method,p.paystack_reference,
-     p.created_at,(p.created_at AT TIME ZONE 'Africa/Accra')::date AS entry_day,
+     p.created_at,(p.created_at AT TIME ZONE 'Africa/Accra')::date day,
      o.order_number
    FROM public.payments p JOIN public.orders o ON o.id=p.order_id
    WHERE (p.created_at AT TIME ZONE 'Africa/Accra')::date BETWEEN p_start AND p_end
  ), refunds AS (
-   SELECT r.id,r.amount,r.created_at,(r.created_at AT TIME ZONE 'Africa/Accra')::date AS entry_day,
+   SELECT r.id,r.amount,r.created_at,(r.created_at AT TIME ZONE 'Africa/Accra')::date day,
      p.order_id,o.order_number,r.reason
    FROM public.payment_refunds r JOIN public.payments p ON p.id=r.payment_id
    JOIN public.orders o ON o.id=p.order_id
    WHERE (r.created_at AT TIME ZONE 'Africa/Accra')::date BETWEEN p_start AND p_end
  ), expenses AS (
-   SELECT id,expense_date AS entry_day,category,description,amount,paid_via,external_reference
+   SELECT id,expense_date day,category,description,amount,paid_via,external_reference
    FROM public.finance_expenses WHERE expense_date BETWEEN p_start AND p_end
  ), activity AS (
-   SELECT 'receipt'::text kind,id::text entry_id,entry_day,amount,order_number detail,method category,
+   SELECT 'receipt'::text kind,id::text entry_id,day,amount,order_number detail,method category,
      coalesce(paystack_reference,'') reference FROM receipts
-   UNION ALL SELECT 'refund',id::text,entry_day,-amount,order_number, 'refund',reason FROM refunds
-   UNION ALL SELECT 'expense',id::text,entry_day,-amount,description,category,coalesce(external_reference,'') FROM expenses
+   UNION ALL SELECT 'refund',id::text,day,-amount,order_number, 'refund',reason FROM refunds
+   UNION ALL SELECT 'expense',id::text,day,-amount,description,category,coalesce(external_reference,'') FROM expenses
  ), daily AS (
-   SELECT entry_day,sum(amount) FILTER (WHERE kind='receipt') receipts,
+   SELECT day,sum(amount) FILTER (WHERE kind='receipt') receipts,
      -sum(amount) FILTER (WHERE kind='refund') refunds,
      -sum(amount) FILTER (WHERE kind='expense') expenses
-   FROM activity GROUP BY entry_day
+   FROM activity GROUP BY day
  )
  SELECT jsonb_build_object(
     'totals',jsonb_build_object(
@@ -81,13 +81,13 @@ BEGIN
       'outstanding_orders',(SELECT coalesce(sum(greatest(total-amount_paid,0)),0)
         FROM public.orders WHERE status::text NOT IN ('cancelled','rejected'))
     ),
-    'daily',(SELECT coalesce(jsonb_agg(jsonb_build_object('date', d.entry_day::text,
+    'daily',(SELECT coalesce(jsonb_agg(jsonb_build_object('date', d.day::text,
        'receipts',coalesce(x.receipts,0),'refunds',coalesce(x.refunds,0),
-       'expenses',coalesce(x.expenses,0),'net',coalesce(x.receipts,0)-coalesce(x.refunds,0)-coalesce(x.expenses,0)) ORDER BY d.entry_day),'[]'::jsonb)
-       FROM (SELECT p_start + n AS entry_day FROM generate_series(0,p_end-p_start) n) d LEFT JOIN daily x ON x.entry_day=d.entry_day),
-    'entries',(SELECT coalesce(jsonb_agg(jsonb_build_object('type',kind,'id',entry_id,'date',entry_day::text,
-      'amount',amount,'detail',detail,'category',category,'reference',reference) ORDER BY entry_day DESC,kind,entry_id),'[]'::jsonb)
-      FROM (SELECT * FROM activity ORDER BY entry_day DESC,kind,entry_id LIMIT 2000) t),
+       'expenses',coalesce(x.expenses,0),'net',coalesce(x.receipts,0)-coalesce(x.refunds,0)-coalesce(x.expenses,0)) ORDER BY d.day),'[]'::jsonb)
+       FROM (SELECT p_start + n AS day FROM generate_series(0,p_end-p_start) n) d LEFT JOIN daily x ON x.day=d.day),
+    'entries',(SELECT coalesce(jsonb_agg(jsonb_build_object('type',kind,'id',entry_id,'date',day::text,
+      'amount',amount,'detail',detail,'category',category,'reference',reference) ORDER BY day DESC,kind,entry_id),'[]'::jsonb)
+      FROM (SELECT * FROM activity ORDER BY day DESC,kind,entry_id LIMIT 2000) t),
     'expense_categories',(SELECT coalesce(jsonb_agg(jsonb_build_object('name',category,'amount',amount) ORDER BY amount DESC),'[]'::jsonb)
       FROM (SELECT category,sum(amount) amount FROM expenses GROUP BY category) c)
  ) INTO v_data;

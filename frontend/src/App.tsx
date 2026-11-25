@@ -16,6 +16,7 @@ import { SalesPage } from '@/pages/sales/SalesPage'
 import { HRPage } from '@/pages/hr/HRPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { StaffSignupPage } from '@/pages/StaffSignupPage'
+import { FinancePage } from '@/pages/finance/FinancePage'
 
 export default function App() {
   const initialize = useAuthStore((s) => s.initialize)
@@ -65,6 +66,7 @@ export default function App() {
               </RoleRoute>
             }
           />
+          <Route path="finance" element={<RoleGate allow={(role) => role === 'admin'} redirectTo="/"><FinancePage /></RoleGate>} />
           <Route
             path="hr"
             element={

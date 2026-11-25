@@ -17,6 +17,7 @@ const navItems = [
   { path: '/production', label: 'Production', Icon: ProductionIcon, module: 'production' as const },
   { path: '/inventory', label: 'Inventory', Icon: InventoryIcon, module: 'inventory' as const },
   { path: '/sales', label: 'Sales', Icon: SalesIcon, module: 'sales' as const },
+  { path: '/finance', label: 'Accounting & Finance', Icon: SalesIcon, module: 'settings' as const },
   { path: '/hr', label: 'HR', Icon: HRIcon, module: 'hr' as const },
   { path: '/settings', label: 'Settings', Icon: SettingsIcon, module: 'settings' as const },
 ]
@@ -29,7 +30,7 @@ interface SidebarProps {
 export function Sidebar({ open, onClose }: SidebarProps) {
   const canAccessModule = useAuthStore((s) => s.canAccessModule)
   const profile = useAuthStore((s) => s.profile)
-  const visibleItems = navItems.filter((item) => canAccessModule(item.module))
+  const visibleItems = navItems.filter((item) => item.path === '/finance' ? profile?.role === 'admin' : canAccessModule(item.module))
 
   return (
     <>
