@@ -18,6 +18,13 @@ interface ProductionRunFormProps {
   onSuccess: () => void
 }
 
+interface SharedInputGroup {
+  key: string
+  input_product_id: string
+  roll_weights: Record<string,string>
+  output_keys: string[]
+}
+
 interface MaterialLine {
   raw_material_id: string
   quantity_kg: string
@@ -84,6 +91,9 @@ export function ProductionRunForm({
 
   const [materials, setMaterials] = useState<MaterialLine[]>([emptyMaterialLine(rawMaterials)])
   const [additionalOutputs, setAdditionalOutputs] = useState<AdditionalOutputLine[]>([])
+  const [inputRecordingMode,setInputRecordingMode] = useState<'individual'|'shared'>('individual')
+  const [sharedGroups,setSharedGroups] = useState<SharedInputGroup[]>([])
+
 
   const updateOutput = (key: string, patch: Partial<AdditionalOutputLine>) => {
     setAdditionalOutputs((outputs) => outputs.map((item) => item.key === key ? { ...item, ...patch } : item))
@@ -143,6 +153,7 @@ export function ProductionRunForm({
 
   const selectedMachine = machines.find((m) => m.id === form.machine_id)
   const isConversion = selectedMachine?.stage === 'conversion'
+  const isSharedMode = isConversion && additionalOutputs.length > 0 && inputRecordingMode === 'shared'
   const isPrinting = isConversion && form.process_type === 'printing'
   const isCutting = isConversion && form.process_type === 'cutting'
   const outputOptions = isConversion ? finishedOnlyGoods : semiFinishedGoods
@@ -155,7 +166,7 @@ export function ProductionRunForm({
   const parsedWeights = parseRollWeights(form.roll_weights_text)
   // Fetch physical rolls for every independently selected semi-finished product.
   const inputProductIds = isConversion
-    ? [...new Set([form.input_product_id, ...additionalOutputs.map(o => o.input_product_id)].filter(Boolean))].sort().join(',')
+    ? [...new Set([form.input_product_id, ...additionalOutputs.map(o => o.input_product_id), ...sharedGroups.map(g => g.input_product_id)].filter(Boolean))].sort().join(',')
     : ''
   useEffect(() => {
     let active = true
@@ -186,7 +197,7 @@ export function ProductionRunForm({
   ])
   // In a multi-output conversion run, kilogram portions can be allocated from
   // the SAME physical roll to more than one finished output.
-  const allocatedRollMode = isConversion && additionalOutputs.length > 0 &&
+  const allocatedRollMode = !isSharedMode && isConversion && additionalOutputs.length > 0 &&
     selectedInputProduct?.unit === 'rolls' && additionalOutputs.every(o =>
       semiFinishedGoods.find(g => g.id === o.input_product_id)?.unit === 'rolls')
   const measuredPortions: RollPortion[] = [
@@ -198,6 +209,12 @@ export function ProductionRunForm({
   const availableRollWeights: Record<string,number> = Object.fromEntries(
     Object.values(availableRollsByProduct).flat().map(r => [r.id,r.weight_kg]))
   const portionError = allocatedRollMode ? checkRollPortions(availableRollWeights, measuredPortions) : null
+  // Preserve the detailed allocation option for measured per-brand consumption.
+  const primaryAllocatedKg = selectedInputRollIds.reduce(
+    (sum,id)=>sum+Number(primaryRollWeights[id] || 0),0)
+  const allocationMatches = (entered:string, measured:number) =>
+    Number.isFinite(Number(entered)) && Number(entered)>0 &&
+    Math.abs(Number(entered)-measured)<0.005
   const inputRolls = availableRollsByProduct[form.input_product_id] || []
   const inputRollError = rollErrorsByProduct[form.input_product_id] || null
   const micronMismatch = (inputId: string, outputId: string, thickness = '') => {
@@ -240,6 +257,8 @@ export function ProductionRunForm({
     })
     setMaterials([emptyMaterialLine(rawMaterials)])
     setAdditionalOutputs([])
+    setInputRecordingMode('individual')
+    setSharedGroups([])
     setSelectedInputRollIds([])
     setPrimaryRollWeights({})
   }
@@ -258,21 +277,21 @@ export function ProductionRunForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if(isConversion && selectedInputProduct?.unit==='rolls' &&
+    if(!isSharedMode && isConversion && selectedInputProduct?.unit==='rolls' &&
       (selectedInputRollIds.length===0 || inputRollError)) {
       addToast('Select the available physical input rolls before logging conversion','error')
       return
     }
-    if (isConversion && (!selectedInputProduct ||
+    if (!isSharedMode && isConversion && (!selectedInputProduct ||
       (selectedInputProduct.unit !== 'rolls' && !(Number(form.input_quantity_consumed) > 0)))) {
       addToast('Choose a semi-finished input and enter its consumed quantity', 'error')
       return
     }
-    if (isConversion && micronMismatch(form.input_product_id, form.finished_good_id, form.film_thickness)) {
+    if (!isSharedMode && isConversion && micronMismatch(form.input_product_id, form.finished_good_id, form.film_thickness)) {
       addToast('Primary input micron must match its finished product', 'error')
       return
     }
-    if (!allocatedRollMode && selectedRollIdsAcrossOutputs.size !== selectedInputRollIds.length +
+    if (!isSharedMode && !allocatedRollMode && selectedRollIdsAcrossOutputs.size !== selectedInputRollIds.length +
         additionalOutputs.reduce((total, o) => total + o.input_roll_ids.length, 0)) {
       addToast('Physical roll sharing requires roll-counted semi-finished inputs for every output', 'error')
       return
@@ -281,12 +300,16 @@ export function ProductionRunForm({
       addToast(portionError, 'error')
       return
     }
+    if (allocatedRollMode && !allocationMatches(form.input_quantity_consumed,primaryAllocatedKg)) {
+      addToast('Primary finished product consumed kg must match the source-roll portions','error')
+      return
+    }
     if (allocatedRollMode && measuredPortions.length !==
         selectedInputRollIds.length + additionalOutputs.reduce((sum,o)=>sum+o.input_roll_ids.length,0)) {
       addToast('Every selected physical roll requires a measured kilogram portion', 'error')
       return
     }
-    if (isConversion && inputRolls.some(r => selectedInputRollIds.includes(r.id) &&
+    if (!isSharedMode && isConversion && inputRolls.some(r => selectedInputRollIds.includes(r.id) &&
         rollMicronMismatch(r.micron, form.input_product_id, form.finished_good_id, form.film_thickness))) {
       addToast('A selected primary input roll has a mismatched micron thickness', 'error')
       return
@@ -327,31 +350,35 @@ export function ProductionRunForm({
         return
       }
       const input = isConversion ? semiFinishedGoods.find(g => g.id === line.input_product_id) : undefined
-      if (isConversion && !input) {
+      if (!isSharedMode && isConversion && !input) {
         addToast(`Choose a semi-finished input for ${product.product_name}`, 'error')
         return
       }
-      if (isConversion && micronMismatch(line.input_product_id, product.id, line.film_thickness)) {
+      if (!isSharedMode && isConversion && micronMismatch(line.input_product_id, product.id, line.film_thickness)) {
         addToast(`Input and finished product micron differ for ${product.product_name}`, 'error')
         return
       }
-      if (isConversion && input?.unit === 'rolls' &&
+      if (!isSharedMode && isConversion && input?.unit === 'rolls' &&
           (line.input_roll_ids.length === 0 || !!rollErrorsByProduct[line.input_product_id])) {
         addToast(`Choose available physical input rolls for ${product.product_name}`, 'error')
         return
       }
-      if (isConversion && input?.unit === 'rolls' &&
+      if (!isSharedMode && isConversion && input?.unit === 'rolls' &&
           (availableRollsByProduct[input.id] || []).some(r => line.input_roll_ids.includes(r.id) &&
             rollMicronMismatch(r.micron, input.id, product.id, line.film_thickness))) {
         addToast(`A semi-finished roll's micron does not match ${product.product_name}`, 'error')
         return
       }
-      if (isConversion && input?.unit !== 'rolls' && !(Number(line.input_quantity_consumed) > 0)) {
+      if (!isSharedMode && isConversion && input?.unit !== 'rolls' && !(Number(line.input_quantity_consumed) > 0)) {
         addToast(`Enter the semi-finished quantity consumed for ${product.product_name}`, 'error')
         return
       }
       if (allocatedRollMode) {
         const consumed = line.input_roll_ids.reduce((sum,id) => sum + Number(line.input_roll_weights[id] || 0),0)
+        if (!allocationMatches(line.input_quantity_consumed,consumed)) {
+          addToast(`Consumed kg for ${product.product_name} must match source-roll portions`,'error')
+          return
+        }
         const actualOutputKg = product.unit === 'rolls' ? weights.reduce((sum,w)=>sum+w,0) : quantity
         if (product.unit !== 'bundle' && actualOutputKg > consumed + 0.01) {
           addToast(`Output ${product.product_name} weighs more than its allocated input`, 'error')
@@ -359,7 +386,7 @@ export function ProductionRunForm({
         }
       }
       moreOutputs.push({
-        ...(allocatedRollMode ? {
+        ...(isSharedMode ? {} : allocatedRollMode ? {
           input_product_id: input!.id,
           input_quantity_consumed: line.input_roll_ids.reduce((sum,id)=>sum+Number(line.input_roll_weights[id]),0),
           input_roll_allocations: line.input_roll_ids.map(id=>({roll_id:id,weight_kg:Number(line.input_roll_weights[id])})),
@@ -415,8 +442,8 @@ export function ProductionRunForm({
         output_quantity: rollMode ? parsedWeights.length : parseFloat(form.output_quantity),
         output_unit: outputProduct.unit,
         roll_weights: rollMode ? parsedWeights : null,
-        input_product_id: isConversion ? (form.input_product_id || null) : null,
-        input_quantity_consumed: isConversion ? (allocatedRollMode
+        input_product_id: isSharedMode ? null : isConversion ? (form.input_product_id || null) : null,
+        input_quantity_consumed: isSharedMode ? 0 : isConversion ? (allocatedRollMode
           ? selectedInputRollIds.reduce((sum,id)=>sum+Number(primaryRollWeights[id]),0)
           : selectedInputProduct?.unit==='rolls' ? selectedInputRollIds.length : (parseFloat(form.input_quantity_consumed) || 0)) : 0,
         ...(allocatedRollMode ? {input_roll_allocations: selectedInputRollIds.map(id=>({
@@ -468,7 +495,53 @@ export function ProductionRunForm({
       }
     // Both paths are atomic. Multi-output posting consumes the selected inputs
     // once, then credits each additional product and its individual rolls.
-    const { error } = allocatedRollMode
+    // A shared input group records only total source-roll consumption. It never
+    // invents per-brand consumption weights.
+    const outputKeys = ['primary',...additionalOutputs.map(o => o.key)]
+    const groupPayload = sharedGroups.map(g=>({
+      input_product_id:g.input_product_id,
+      output_indices:g.output_keys.map(key=>outputKeys.indexOf(key)),
+      roll_allocations:Object.entries(g.roll_weights).filter(([,kg])=>Number(kg)>0)
+        .map(([roll_id,kg])=>({roll_id,weight_kg:Number(kg)})),
+    }))
+    if(isSharedMode) {
+      if(sharedGroups.length===0 || sharedGroups.some(g=>!g.input_product_id ||
+        g.output_keys.length===0 || Object.values(g.roll_weights).length===0)) {
+        addToast('Assign every finished output to a shared semi-finished input group and enter consumed roll weights','error')
+        return
+      }
+      const counts=outputKeys.map(key=>sharedGroups.filter(g=>g.output_keys.includes(key)).length)
+      if(counts.some(n=>n!==1)) {
+        addToast('Each finished product must belong to exactly one shared input group','error')
+        return
+      }
+      const used=new Set<string>()
+      for(const g of sharedGroups) {
+        const input=semiFinishedGoods.find(x=>x.id===g.input_product_id)
+        if(!input || input.unit!=='rolls') {addToast('Shared groups require a roll-counted semi-finished product','error');return}
+        const selected=Object.entries(g.roll_weights)
+        if(selected.some(([id,kg])=>!Number.isFinite(Number(kg))||Number(kg)<=0 ||
+          Number(kg)>Number(availableRollWeights[id]||0)||Math.abs(Math.round(Number(kg)*100)-Number(kg)*100)>1e-6 || used.has(id))) {
+          addToast('Shared group weights must be positive, at most the available roll weight, and each roll can belong to only one group','error');return
+        }
+        for(const [id] of selected) used.add(id)
+        for(const key of g.output_keys) {
+          const idx=outputKeys.indexOf(key)
+          const product=finishedOnlyGoods.find(x=>x.id===(idx===0?form.finished_good_id:additionalOutputs[idx-1].finished_good_id))
+          const thickness=idx===0?form.film_thickness:additionalOutputs[idx-1].film_thickness
+          if(!product || micronMismatch(input.id,product.id,thickness) ||
+            selected.some(([id])=>{
+              const roll=(availableRollsByProduct[input.id]||[]).find(r=>r.id===id)
+              return !roll || rollMicronMismatch(roll.micron,input.id,product.id,thickness)
+            })) {addToast('Shared input group contains an incompatible finished product or physical roll','error');return}
+        }
+      }
+    }
+    const { error } = isSharedMode
+      ? await supabase.rpc('post_shared_conversion_run', {
+          p_run: runPayload,p_additional_outputs: moreOutputs,p_input_groups: groupPayload,
+        })
+      : allocatedRollMode
       ? await supabase.rpc('post_allocated_conversion_run', {
           p_run: runPayload, p_additional_outputs: moreOutputs,
         })
@@ -627,6 +700,64 @@ export function ProductionRunForm({
           </div>
         )}
 
+        {isConversion && <section className="rounded-lg border p-3 space-y-2" aria-label="Input consumption recording method">
+          <p className="font-medium text-sm">How was semi-finished material consumption measured?</p>
+          <div className="flex gap-4 text-sm">
+            <label><input type="radio" name="input-mode" checked={inputRecordingMode==='individual'} onChange={()=>setInputRecordingMode('individual')} /> Individual allocation per finished product</label>
+            <label><input type="radio" name="input-mode" checked={inputRecordingMode==='shared'} onChange={()=>setInputRecordingMode('shared')} /> Shared total by input material</label>
+          </div>
+          <p className="text-xs text-slate-600">Shared mode records the total kg used by each semi-finished material, linked to multiple finished outputs. It does not estimate per-brand input quantities.</p>
+          {inputRecordingMode==='shared' && additionalOutputs.length===0 && <p className="text-xs text-amber-700">Add another finished product to enable shared input groups.</p>}
+        </section>}
+        {isSharedMode && <section aria-label="Shared semi-finished input groups" className="rounded-lg bg-blue-50 border border-blue-200 p-4 space-y-3">
+          <div className="flex justify-between items-center gap-2">
+            <h3 className="font-semibold">Shared input groups (measured total kg)</h3>
+            <Button type="button" variant="secondary" onClick={()=>setSharedGroups(groups=>[...groups,{
+              key:crypto.randomUUID(),input_product_id:'',roll_weights:{},output_keys:[],
+            }])}>+ Add input group</Button>
+          </div>
+          {sharedGroups.map((group,i)=>{
+            const rolls=availableRollsByProduct[group.input_product_id]||[]
+            const groupTotal=Object.values(group.roll_weights).reduce((a,v)=>a+Number(v||0),0)
+            const outputs=[{key:'primary',name:outputProduct?.product_name||'Primary output'},
+              ...additionalOutputs.map((o,j)=>({key:o.key,name:finishedOnlyGoods.find(g=>g.id===o.finished_good_id)?.product_name||`Output ${j+2}`}))]
+            return <div key={group.key} className="bg-white p-3 rounded-lg border space-y-3">
+              <div className="flex justify-between"><strong className="text-sm">Input group {i+1}</strong>
+                <Button type="button" variant="secondary" onClick={()=>setSharedGroups(items=>items.filter(g=>g.key!==group.key))}>Remove</Button></div>
+              <Select label="Semi-finished input product (micron)" value={group.input_product_id}
+                onChange={e=>setSharedGroups(items=>items.map(g=>g.key===group.key?{...g,input_product_id:e.target.value,roll_weights:{}}:g))} required>
+                <option value="">— Select material —</option>
+                {semiFinishedGoods.filter(g=>g.unit==='rolls').map(g=><option key={g.id} value={g.id}>{g.product_name} ({g.spec_thickness??'—'} µ)</option>)}
+              </Select>
+              <p className="text-sm font-medium">Finished products sharing this input (no per-product kg required)</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {outputs.map(o=><label key={o.key} className="text-sm flex items-center gap-2">
+                  <input type="checkbox" checked={group.output_keys.includes(o.key)}
+                    onChange={e=>setSharedGroups(items=>items.map(g=>g.key===group.key?{
+                      ...g,output_keys:e.target.checked?[...g.output_keys,o.key]:g.output_keys.filter(key=>key!==o.key),
+                    }:g))} /> {o.name}
+                </label>)}
+              </div>
+              <p className="text-sm font-medium">Source rolls and total measured kg used</p>
+              {rollErrorsByProduct[group.input_product_id] && <p role="alert" className="text-red-700">{rollErrorsByProduct[group.input_product_id]}</p>}
+              <div className="max-h-44 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {rolls.map(roll=><div key={roll.id} className="text-xs border p-2 rounded">
+                  <label className="flex gap-2 items-center">
+                    <input type="checkbox" checked={group.roll_weights[roll.id]!==undefined}
+                      onChange={e=>setSharedGroups(items=>items.map(g=>g.key===group.key?{
+                        ...g,roll_weights:e.target.checked?{...g.roll_weights,[roll.id]:''}:Object.fromEntries(Object.entries(g.roll_weights).filter(([id])=>id!==roll.id)),
+                      }:g))} /> Roll #{roll.roll_no} · {roll.weight_kg} kg remaining
+                  </label>
+                  {group.roll_weights[roll.id]!==undefined && <Input label="Total kg consumed from roll" type="number" min="0.01" max={roll.weight_kg} step="0.01"
+                    value={group.roll_weights[roll.id]} onChange={e=>setSharedGroups(items=>items.map(g=>g.key===group.key?{
+                      ...g,roll_weights:{...g.roll_weights,[roll.id]:e.target.value},
+                    }:g))} required />}
+                </div>)}
+              </div>
+              <p className="text-sm">Total group input: <strong>{groupTotal.toFixed(2)} kg</strong></p>
+            </div>
+          })}
+        </section>}
         <section aria-label="Additional production outputs" className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -672,7 +803,12 @@ export function ProductionRunForm({
                   <Input label={`Quantity${product ? ` (${product.unit})` : ''}`} type="number" min="0.01" step="0.01" required
                     value={line.output_quantity} onChange={(e) => updateOutput(line.key, { output_quantity: e.target.value })} />
                 )}
-                {isConversion && <section aria-label={`Semi-finished input for output ${index + 2}`}
+                {isConversion && allocatedRollMode && <Input
+                  label={`Measured input used for ${product?.product_name || 'finished product'} (kg)`}
+                  type="number" min="0.01" step="0.01" required
+                  value={line.input_quantity_consumed}
+                  onChange={e=>updateOutput(line.key,{input_quantity_consumed:e.target.value})} />}
+                {isConversion && !isSharedMode && <section aria-label={`Semi-finished input for output ${index + 2}`}
                   className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-3">
                   <h4 className="text-sm font-semibold text-amber-950">Input for output {index + 2}</h4>
                   <Select label="Semi-finished input product" required value={line.input_product_id}
@@ -748,9 +884,32 @@ export function ProductionRunForm({
           })}
         </section>
 
-        {isConversion ? (
+        {isSharedMode && <section className="border-t pt-3 space-y-3" aria-label="Shared conversion process settings">
+          <p className="font-medium text-sm">Conversion process settings</p>
+          {isCutting && <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <Input label="Cut Length (mm)" type="number" value={form.cut_length_mm}
+              onChange={e=>setForm({...form,cut_length_mm:e.target.value})} />
+            <Input label="Bottom Seal Offset (mm)" type="number" value={form.bottom_seal_offset_mm}
+              onChange={e=>setForm({...form,bottom_seal_offset_mm:e.target.value})} />
+            <Input label="Cutting Speed (cuts/min)" type="number" value={form.cutting_speed_cpm}
+              onChange={e=>setForm({...form,cutting_speed_cpm:e.target.value})} />
+          </div>}
+          {isPrinting && <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <Input label="Colours" type="number" value={form.print_colours_count}
+              onChange={e=>setForm({...form,print_colours_count:e.target.value})} />
+            <Input label="Print Speed" type="number" value={form.print_speed}
+              onChange={e=>setForm({...form,print_speed:e.target.value})} />
+            <Input label="Print Tension" type="number" value={form.print_tension}
+              onChange={e=>setForm({...form,print_tension:e.target.value})} />
+          </div>}
+        </section>}
+        {isConversion && !isSharedMode ? (
           <div className="border-t pt-4">
             <p className="text-sm font-medium text-slate-700 mb-3">Semi-Finished Input for Primary Output</p>
+            {allocatedRollMode && <Input label="Measured input consumed by primary finished product (kg)"
+              type="number" min="0.01" step="0.01" required
+              value={form.input_quantity_consumed}
+              onChange={e=>setForm({...form,input_quantity_consumed:e.target.value})} />}
             <div className="grid grid-cols-2 gap-4">
               <Select
                 label="Semi-Finished Roll (input)"
@@ -885,7 +1044,7 @@ export function ProductionRunForm({
               </>
             )}
           </div>
-        ) : (
+        ) : isConversion ? null : (
           <div className="border-t pt-4">
             <div className="flex items-center justify-between mb-3">
               <p className="text-sm font-medium text-slate-700">Mixing Formula</p>

@@ -36,7 +36,7 @@ export function ProductionPage() {
       supabase
         .from('production_runs')
         .select(
-          '*, machines(machine_code, name, stage), finished_goods:finished_goods!production_runs_finished_good_id_fkey(product_name, stage), input_product:finished_goods!production_runs_input_product_id_fkey(product_name), production_run_materials(quantity_kg, raw_materials(name)), production_run_additional_outputs(id, output_quantity, output_unit, roll_weights, batch_id, input_product_id, input_quantity_consumed, input_product:finished_goods!production_run_additional_outputs_input_product_id_fkey(product_name,unit), finished_goods:finished_goods!production_run_additional_outputs_finished_good_id_fkey(product_name,stage)), production_run_roll_allocations(input_roll_id,consumed_weight_kg,production_output_id,product_rolls:product_rolls!production_run_roll_allocations_input_roll_id_fkey(roll_no))'
+          '*, machines(machine_code, name, stage), finished_goods:finished_goods!production_runs_finished_good_id_fkey(product_name, stage), input_product:finished_goods!production_runs_input_product_id_fkey(product_name), production_run_materials(quantity_kg, raw_materials(name)), production_run_additional_outputs(id, output_quantity, output_unit, roll_weights, batch_id, input_product_id, input_quantity_consumed, input_product:finished_goods!production_run_additional_outputs_input_product_id_fkey(product_name,unit), finished_goods:finished_goods!production_run_additional_outputs_finished_good_id_fkey(product_name,stage)), production_run_roll_allocations(input_roll_id,consumed_weight_kg,production_output_id,product_rolls:product_rolls!production_run_roll_allocations_input_roll_id_fkey(roll_no)), production_run_input_groups(id,input_product_id,consumed_weight_kg,input_product:finished_goods!production_run_input_groups_input_product_id_fkey(product_name),production_run_input_group_outputs(production_output_id),production_run_input_group_rolls(input_roll_id,consumed_weight_kg,product_rolls:product_rolls!production_run_input_group_rolls_input_roll_id_fkey(roll_no)))'
         )
         .order('run_date', { ascending: false })
         .limit(50),
@@ -142,7 +142,17 @@ export function ProductionPage() {
                 .filter(p => p.production_output_id === outputId)
                 .map(p => `#${p.product_rolls?.roll_no ?? p.input_roll_id.slice(0,8)} (${formatNumber(p.consumed_weight_kg)} kg)`)
                 .join(', ')
-              const consumedLabel = isConversion
+              const sharedLabel = (r.production_run_input_groups || []).map(group => {
+                const members = (group.production_run_input_group_outputs || []).map(member =>
+                  member.production_output_id == null ? outputLines[0]?.name :
+                    outputLines.find(line => line.id === member.production_output_id)?.name || 'Unknown output')
+                const sourceRolls = (group.production_run_input_group_rolls || []).map(roll =>
+                  `#${roll.product_rolls?.roll_no ?? roll.input_roll_id.slice(0,8)} (${formatNumber(roll.consumed_weight_kg)} kg)`).join(', ')
+                return `${formatNumber(group.consumed_weight_kg)} kg ${group.input_product?.product_name || 'semi-finished input'} shared by ${members.join(', ')}${sourceRolls ? ` · source rolls ${sourceRolls}` : ''}`
+              }).join(' · ')
+              const consumedLabel = r.input_accounting_mode === 'shared_groups'
+                ? sharedLabel
+                : isConversion
                 ? [
                     `${formatNumber(r.input_quantity_consumed)} ${r.input_accounting_mode === 'allocated_kg' ? 'kg of' : 'units of'} ${(r.input_product as FinishedGood)?.product_name || 'input'} (primary)${partsLabel(null) ? ` · Rolls: ${partsLabel(null)}` : ''}`,
                     ...additional.map((o,i) => o.input_product_id
@@ -173,11 +183,12 @@ export function ProductionPage() {
                         {(r.machines as Machine)?.name} · {r.operator_name}
                       </p>
                       <p className="text-xs text-slate-500">
-                        {r.finished_goods?.product_name || '—'} {isConversion ? `← ${(r.input_product as FinishedGood)?.product_name || 'input'}` : ''}
+                        {r.finished_goods?.product_name || '—'} {isConversion && r.input_accounting_mode !== 'shared_groups' ? `← ${(r.input_product as FinishedGood)?.product_name || 'input'}` : ''}
                       </p>
+                      {r.input_accounting_mode === 'shared_groups' && <p className="text-xs text-blue-800">{sharedLabel}</p>}
                       {additional.map((o) => <p key={o.id} className="text-xs text-slate-500">
                         + {o.finished_goods?.product_name || 'Product'}: {formatNumber(o.output_quantity)} {o.output_unit}
-                        {isConversion && ` ← ${o.input_product_id
+                        {isConversion && r.input_accounting_mode !== 'shared_groups' && ` ← ${o.input_product_id
                           ? `${formatNumber(o.input_quantity_consumed || 0)} ${r.input_accounting_mode === 'allocated_kg' ? 'kg of' : 'units of'} ${o.input_product?.product_name || 'semi-finished input'}`
                           : 'historical input not recorded'}`}
                       </p>)}

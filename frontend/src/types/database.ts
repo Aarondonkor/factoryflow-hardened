@@ -110,6 +110,19 @@ export interface ProductionRunRollAllocation {
   product_rolls?: {roll_no: number} | null
 }
 
+export interface ProductionRunSharedInputGroup {
+  id: string
+  input_product_id: string
+  consumed_weight_kg: number
+  input_product?: {product_name: string} | null
+  production_run_input_group_outputs?: {production_output_id: string | null}[]
+  production_run_input_group_rolls?: {
+    input_roll_id: string
+    consumed_weight_kg: number
+    product_rolls?: {roll_no: number} | null
+  }[]
+}
+
 export interface ProductionRun {
   id: string
   run_date: string
@@ -129,7 +142,7 @@ export interface ProductionRun {
   additive_consumed: number
   input_product_id: string | null
   input_quantity_consumed: number
-  input_accounting_mode?: 'standard' | 'allocated_kg'
+  input_accounting_mode?: 'standard' | 'allocated_kg' | 'shared_groups'
   roll_weights: number[] | null
   process_type: ConversionProcessType | null
 
@@ -180,6 +193,7 @@ export interface ProductionRun {
   production_run_materials?: ProductionRunMaterial[]
   production_run_additional_outputs?: ProductionRunAdditionalOutput[]
   production_run_roll_allocations?: ProductionRunRollAllocation[]
+  production_run_input_groups?: ProductionRunSharedInputGroup[]
 }
 
 export interface MachineDowntime {
